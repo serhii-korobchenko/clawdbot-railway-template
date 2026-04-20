@@ -1,6 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
 set -e
 
+mkdir -p /data/workspace/docs/inbox
+mkdir -p /data/workspace/docs/library
+mkdir -p /data/workspace/docs/processed
+mkdir -p /data/workspace/docs/failed
 
-node upload-server.js &
+node /app/upload-server.js &
 openclaw gateway
