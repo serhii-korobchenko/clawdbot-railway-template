@@ -87,3 +87,4 @@ EXPOSE 8080
 # Ensure PID 1 reaps zombies and forwards signals.
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "src/server.js"]
+CMD ["./start.sh"]
