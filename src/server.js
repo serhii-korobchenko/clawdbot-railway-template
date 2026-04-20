@@ -39,6 +39,14 @@ const STATE_DIR =
 const WORKSPACE_DIR =
   process.env.OPENCLAW_WORKSPACE_DIR?.trim() ||
   path.join(STATE_DIR, "workspace");
+const DOCS_DIR = process.env.DOCS_DIR?.trim() || "/data/workspace/docs";
+const DOCS_INBOX_DIR = path.join(DOCS_DIR, "inbox");
+const DOCS_LIBRARY_DIR = path.join(DOCS_DIR, "library");
+const DOCS_PROCESSED_DIR = path.join(DOCS_DIR, "processed");
+const DOCS_FAILED_DIR = path.join(DOCS_DIR, "failed");
+const MAX_UPLOAD_MB = Number.parseInt(process.env.MAX_UPLOAD_MB ?? "25", 10);
+const UPLOAD_TOKEN = process.env.UPLOAD_TOKEN?.trim() || "";
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([".pdf", ".docx", ".txt", ".md"]);
 
 // Protect /setup with a user-provided password.
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
@@ -299,6 +307,66 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
+for (const dir of [DOCS_INBOX_DIR, DOCS_LIBRARY_DIR, DOCS_PROCESSED_DIR, DOCS_FAILED_DIR]) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function sanitizeUploadName(name) {
+  return String(name || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function listDocsFiles() {
+  const buckets = [
+    { bucket: "inbox", dir: DOCS_INBOX_DIR },
+    { bucket: "library", dir: DOCS_LIBRARY_DIR },
+    { bucket: "processed", dir: DOCS_PROCESSED_DIR },
+    { bucket: "failed", dir: DOCS_FAILED_DIR },
+  ];
+
+  const files = [];
+  for (const { bucket, dir } of buckets) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const fullPath = path.join(dir, entry.name);
+      let stat = null;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        stat = null;
+      }
+      if (!stat) continue;
+
+      files.push({
+        bucket,
+        name: entry.name,
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    }
+  }
+
+  files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+  return files;
+}
+
+function requireUploadToken(req, res, next) {
+  if (!UPLOAD_TOKEN) return next();
+
+  const token = req.header("x-upload-token") || req.query?.token;
+  if (token !== UPLOAD_TOKEN) {
+    return res.status(401).json({ ok: false, error: "unauthorized" });
+  }
+
+  return next();
+}
+
 // Minimal health endpoint for Railway.
 app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
 
@@ -352,6 +420,143 @@ app.get("/healthz", async (_req, res) => {
       lastDoctorAt,
     },
   });
+});
+
+app.get("/upload", (req, res) => {
+  res.type("html").send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Upload file</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 2rem; max-width: 760px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 1.25rem; }
+    label { display:block; margin-top: 0.75rem; font-weight: 600; }
+    input, button { width: 100%; padding: 0.7rem; margin-top: 0.3rem; }
+    button { border-radius: 8px; border: 0; background: #111; color: white; font-weight: 600; cursor: pointer; }
+    .muted { color: #555; font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Upload document</h1>
+    <p class="muted">Allowed extensions: .pdf, .docx, .txt, .md</p>
+    <form id="uploadForm">
+      <label for="file">File</label>
+      <input id="file" name="file" type="file" required />
+      <label for="uploadToken">Upload token (optional, if UPLOAD_TOKEN is set)</label>
+      <input id="uploadToken" name="uploadToken" type="text" autocomplete="off" />
+      <button type="submit">Upload</button>
+    </form>
+    <h2>Files in container</h2>
+    <p class="muted">Shows files currently in /data/workspace/docs/*</p>
+    <button id="refreshFiles" type="button">Refresh file list</button>
+    <pre id="files"></pre>
+    <pre id="result"></pre>
+  </div>
+  <script>
+    const form = document.getElementById("uploadForm");
+    const fileInput = document.getElementById("file");
+    const tokenInput = document.getElementById("uploadToken");
+    const result = document.getElementById("result");
+    const filesEl = document.getElementById("files");
+    const refreshFilesEl = document.getElementById("refreshFiles");
+
+    async function refreshFiles() {
+      const token = tokenInput.value.trim();
+      const qs = token ? ("?token=" + encodeURIComponent(token)) : "";
+      const response = await fetch("/upload/files" + qs);
+      filesEl.textContent = await response.text();
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+
+      const token = tokenInput.value.trim();
+      const qs = token ? ("?token=" + encodeURIComponent(token)) : "";
+      result.textContent = "Uploading...";
+
+      const response = await fetch("/upload" + qs, {
+        method: "POST",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+          "x-filename": file.name
+        },
+        body: await file.arrayBuffer()
+      });
+
+      const body = await response.text();
+      result.textContent = body;
+      await refreshFiles();
+    });
+
+    refreshFilesEl.addEventListener("click", refreshFiles);
+    refreshFiles();
+  </script>
+</body>
+</html>`);
+});
+
+app.get("/upload/files", requireUploadToken, (_req, res) => {
+  const files = listDocsFiles();
+  return res.json({
+    ok: true,
+    docsDir: DOCS_DIR,
+    count: files.length,
+    files,
+  });
+});
+
+app.post(
+  "/upload",
+  express.raw({ type: "*/*", limit: `${MAX_UPLOAD_MB}mb` }),
+  requireUploadToken,
+  (req, res) => {
+    const originalName = String(req.header("x-filename") || req.query?.filename || "").trim();
+    if (!originalName) {
+      return res.status(400).json({ ok: false, error: "filename_missing" });
+    }
+
+    const ext = path.extname(originalName).toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+      return res.status(400).json({ ok: false, error: `unsupported_file_type:${ext}` });
+    }
+
+    const base = path.basename(originalName, ext);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const rnd = crypto.randomBytes(4).toString("hex");
+    const filename = `${sanitizeUploadName(base)}__${ts}__${rnd}${ext}`;
+    const targetPath = path.join(DOCS_INBOX_DIR, filename);
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+
+    if (!data.length) {
+      return res.status(400).json({ ok: false, error: "file_missing" });
+    }
+
+    fs.writeFileSync(targetPath, data);
+
+    return res.json({
+      ok: true,
+      filename,
+      originalName,
+      size: data.length,
+      path: targetPath,
+    });
+  }
+);
+
+app.use((err, _req, res, next) => {
+  if (!err) return next();
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ ok: false, error: "file_too_large" });
+  }
+  if (typeof err?.message === "string" && err.message.startsWith("unsupported_file_type:")) {
+    return res.status(400).json({ ok: false, error: err.message });
+  }
+  return next(err);
 });
 
 app.get("/setup/app.js", requireSetupAuth, (_req, res) => {

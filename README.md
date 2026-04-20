@@ -173,6 +173,78 @@ docker run --rm -p 8080:8080 \
 # open http://localhost:8080/setup (password: test)
 ```
 
+## How to verify file uploads
+
+After deploy (or with the local smoke test running), you can verify upload end-to-end in 3 quick checks.
+
+### 1) Upload from browser UI
+
+- Open `https://<your-app>/upload` (or `http://localhost:8080/upload` locally).
+- Pick a `.pdf`, `.docx`, `.txt`, or `.md` file and submit.
+- You should get JSON with `"ok": true` and a generated filename/path.
+
+### 2) Upload from terminal with `curl`
+
+```bash
+printf 'hello upload' > /tmp/test-upload.txt
+
+curl -sS -X POST \
+  -H 'x-filename: test-upload.txt' \
+  --data-binary @/tmp/test-upload.txt \
+  https://<your-app>/upload
+```
+
+If `UPLOAD_TOKEN` is set, include it:
+
+```bash
+curl -sS -X POST \
+  -H 'x-filename: test-upload.txt' \
+  -H 'x-upload-token: <UPLOAD_TOKEN>' \
+  --data-binary @/tmp/test-upload.txt \
+  https://<your-app>/upload
+```
+
+Expected response contains:
+
+- `"ok": true`
+- `"path": "/data/workspace/docs/inbox/..."`
+
+### 3) Confirm file exists in inbox on disk
+
+From an attached shell inside the container:
+
+```bash
+ls -lah /data/workspace/docs/inbox
+```
+
+You should see the uploaded file with a timestamped/randomized filename.
+
+### 4) View files via HTTP (without shell access)
+
+You can list files currently present in the container docs folders:
+
+```bash
+curl -sS https://<your-app>/upload/files
+```
+
+If `UPLOAD_TOKEN` is set:
+
+```bash
+curl -sS "https://<your-app>/upload/files?token=<UPLOAD_TOKEN>"
+```
+
+Response includes file metadata from:
+- `/data/workspace/docs/inbox`
+- `/data/workspace/docs/library`
+- `/data/workspace/docs/processed`
+- `/data/workspace/docs/failed`
+
+### Common failure reasons
+
+- `unsupported_file_type:...` — extension is not one of `.pdf/.docx/.txt/.md`.
+- `filename_missing` — `x-filename` (or `filename` query param) was not sent.
+- `unauthorized` — `UPLOAD_TOKEN` is configured but token was not provided or incorrect.
+
 ---
 
 ## Official template / endorsements
