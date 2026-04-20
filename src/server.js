@@ -315,6 +315,47 @@ function sanitizeUploadName(name) {
   return String(name || "").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function listDocsFiles() {
+  const buckets = [
+    { bucket: "inbox", dir: DOCS_INBOX_DIR },
+    { bucket: "library", dir: DOCS_LIBRARY_DIR },
+    { bucket: "processed", dir: DOCS_PROCESSED_DIR },
+    { bucket: "failed", dir: DOCS_FAILED_DIR },
+  ];
+
+  const files = [];
+  for (const { bucket, dir } of buckets) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const fullPath = path.join(dir, entry.name);
+      let stat = null;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        stat = null;
+      }
+      if (!stat) continue;
+
+      files.push({
+        bucket,
+        name: entry.name,
+        size: stat.size,
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    }
+  }
+
+  files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+  return files;
+}
+
 function requireUploadToken(req, res, next) {
   if (!UPLOAD_TOKEN) return next();
 
@@ -408,6 +449,10 @@ app.get("/upload", (req, res) => {
       <input id="uploadToken" name="uploadToken" type="text" autocomplete="off" />
       <button type="submit">Upload</button>
     </form>
+    <h2>Files in container</h2>
+    <p class="muted">Shows files currently in /data/workspace/docs/*</p>
+    <button id="refreshFiles" type="button">Refresh file list</button>
+    <pre id="files"></pre>
     <pre id="result"></pre>
   </div>
   <script>
@@ -415,6 +460,15 @@ app.get("/upload", (req, res) => {
     const fileInput = document.getElementById("file");
     const tokenInput = document.getElementById("uploadToken");
     const result = document.getElementById("result");
+    const filesEl = document.getElementById("files");
+    const refreshFilesEl = document.getElementById("refreshFiles");
+
+    async function refreshFiles() {
+      const token = tokenInput.value.trim();
+      const qs = token ? ("?token=" + encodeURIComponent(token)) : "";
+      const response = await fetch("/upload/files" + qs);
+      filesEl.textContent = await response.text();
+    }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -436,10 +490,24 @@ app.get("/upload", (req, res) => {
 
       const body = await response.text();
       result.textContent = body;
+      await refreshFiles();
     });
+
+    refreshFilesEl.addEventListener("click", refreshFiles);
+    refreshFiles();
   </script>
 </body>
 </html>`);
+});
+
+app.get("/upload/files", requireUploadToken, (_req, res) => {
+  const files = listDocsFiles();
+  return res.json({
+    ok: true,
+    docsDir: DOCS_DIR,
+    count: files.length,
+    files,
+  });
 });
 
 app.post(
