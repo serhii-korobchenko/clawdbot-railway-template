@@ -66,7 +66,7 @@ ENV PATH="/data/npm/bin:/data/pnpm:${PATH}"
 WORKDIR /app
 
 # Wrapper deps
-COPY package.json ./
+COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
 # Copy built openclaw
