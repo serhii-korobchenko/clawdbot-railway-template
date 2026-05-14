@@ -33,6 +33,9 @@ RUN set -eux; \
     sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*"workspace:[^"]+"/"openclaw": "*"/g' "$f"; \
   done
 
+# Disable pnpm minimum release age gate for OpenClaw source build
+RUN printf '\nminimumReleaseAge: 0\nminimumReleaseAgeExclude:\n  - "@openclaw/fs-safe"\n' >> pnpm-workspace.yaml
+
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
