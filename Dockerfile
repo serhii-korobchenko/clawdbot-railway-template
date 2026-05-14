@@ -21,12 +21,10 @@ RUN corepack enable
 WORKDIR /openclaw
 
 # Pin to a known-good ref (tag/branch). Override in Railway template settings if needed.
-# Using a released tag avoids build breakage when `main` temporarily references unpublished packages.
 ARG OPENCLAW_GIT_REF=v2026.5.6
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 # Patch: relax version requirements for packages that may reference unpublished versions.
-# Apply to all extension package.json files to handle workspace protocol (workspace:*).
 RUN set -eux; \
   find ./extensions -name 'package.json' -type f | while read -r f; do \
     sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*">=[^"]+"/"openclaw": "*"/g' "$f"; \
@@ -43,20 +41,23 @@ RUN pnpm ui:install && pnpm ui:build
 FROM node:22-bookworm
 ENV NODE_ENV=production
 
+# Runtime system dependencies:
+# - python3 / python3-pip: required by Python-based skills such as imou-device-video
+# - ffmpeg: provides ffmpeg and ffprobe for HLS/audio extraction
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     tini \
     python3 \
+    python3-pip \
     python3-venv \
+    ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 # `openclaw update` expects pnpm. Provide it in the runtime image.
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 # Persist user-installed tools by default by targeting the Railway volume.
-# - npm global installs -> /data/npm
-# - pnpm global installs -> /data/pnpm (binaries) + /data/pnpm-store (store)
 ENV NPM_CONFIG_PREFIX=/data/npm
 ENV NPM_CONFIG_CACHE=/data/npm-cache
 ENV PNPM_HOME=/data/pnpm
@@ -69,6 +70,12 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
+# Python dependencies for skills
+COPY requirements.txt* ./
+RUN if [ -f requirements.txt ]; then \
+      pip3 install --break-system-packages --no-cache-dir -r requirements.txt; \
+    fi
+
 # Copy built openclaw
 COPY --from=openclaw-build /openclaw /openclaw
 
@@ -79,12 +86,7 @@ RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"'
 COPY src ./src
 COPY . /app
 
-# The wrapper listens on $PORT.
-# IMPORTANT: Do not set a default PORT here.
-# Railway injects PORT at runtime and routes traffic to that port.
-# If we force a different port, deployments can come up but the domain will route elsewhere.
 EXPOSE 8080
 
-# Ensure PID 1 reaps zombies and forwards signals.
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "src/server.js"]
