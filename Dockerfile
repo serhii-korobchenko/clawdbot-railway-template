@@ -34,7 +34,7 @@ RUN set -eux; \
   done
 
 # Disable pnpm minimum release age gate for OpenClaw source build
-RUN printf '\nminimumReleaseAge: 0\nminimumReleaseAgeExclude:\n  - "@openclaw/fs-safe"\n' >> pnpm-workspace.yaml
+RUN node -e "const fs=require('fs'); const p='pnpm-workspace.yaml'; let s=fs.readFileSync(p,'utf8'); s=s.replace(/minimumReleaseAge:\s*[^\n]+/,'minimumReleaseAge: 0'); s=s.replace(/minimumReleaseAgeExclude:\n(?:\s+- .+\n?)*/,'minimumReleaseAgeExclude:\n  - \"@openclaw/fs-safe\"\n'); fs.writeFileSync(p,s);"
 
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm build
