@@ -1519,10 +1519,12 @@ const proxy = httpProxy.createProxyServer({
   target: GATEWAY_TARGET,
   ws: true,
   xfwd: true,
+  changeOrigin: true,
 });
 
 proxy.on("error", (err, _req, res) => {
   console.error("[proxy]", err);
+
   try {
     if (res && typeof res.writeHead === "function" && !res.headersSent) {
       res.writeHead(502, { "Content-Type": "text/plain" });
@@ -1533,45 +1535,30 @@ proxy.on("error", (err, _req, res) => {
   }
 });
 
-// --- Dashboard password protection ---
-// Require the same SETUP_PASSWORD for the entire Control UI dashboard,
-// not just the /setup routes.  Healthcheck is excluded so Railway probes work.
-function requireDashboardAuth(req, res, next) {
-  if (req.path === "/healthz" || req.path === "/setup/healthz") return next();
-  if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth
-  if (!SETUP_PASSWORD) return next(); // no password configured → open
-  const header = req.headers.authorization || "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Dashboard"');
-    return res.status(401).send("Auth required");
-  }
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const idx = decoded.indexOf(":");
-  const password = idx >= 0 ? decoded.slice(idx + 1) : "";
-  if (password !== SETUP_PASSWORD) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Dashboard"');
-    return res.status(401).send("Invalid password");
-  }
-  return next();
-}
-
 // --- Gateway token injection ---
-// The gateway is only reachable from this container. The Control UI in the browser
-// cannot set custom Authorization headers for WebSocket connections, so we inject
-// the token into proxied requests at the wrapper level.
-function attachGatewayAuthHeader(req) {
-  if (!req?.headers?.authorization && OPENCLAW_GATEWAY_TOKEN) {
-    req.headers.authorization = `Bearer ${OPENCLAW_GATEWAY_TOKEN}`;
-  }
+// Important:
+// /setup is protected by SETUP_PASSWORD through requireSetupAuth.
+// The main OpenClaw UI must NOT be protected by Basic Auth.
+// Before proxying to the OpenClaw Gateway, always remove any browser-cached
+// Basic Authorization header and replace it with the Gateway Bearer token.
+function injectGatewayAuth(proxyReq) {
+  if (!OPENCLAW_GATEWAY_TOKEN) return;
+
+  proxyReq.removeHeader("authorization");
+  proxyReq.setHeader("authorization", `Bearer ${OPENCLAW_GATEWAY_TOKEN}`);
 }
 
-proxy.on("proxyReqWs", (_proxyReq, req) => {
-  attachGatewayAuthHeader(req);
+proxy.on("proxyReq", (proxyReq) => {
+  injectGatewayAuth(proxyReq);
 });
 
-app.use(requireDashboardAuth, async (req, res) => {
-  // If not configured, force users to /setup for any non-setup routes.
+proxy.on("proxyReqWs", (proxyReq) => {
+  injectGatewayAuth(proxyReq);
+});
+
+app.use(async (req, res) => {
+  // If OpenClaw is not configured yet, send users to /setup.
+  // /setup itself is already handled above and protected by requireSetupAuth.
   if (!isConfigured() && !req.path.startsWith("/setup")) {
     return res.redirect("/setup");
   }
@@ -1588,11 +1575,11 @@ app.use(requireDashboardAuth, async (req, res) => {
         "- Visit /setup and check the Debug Console",
         "- Visit /setup/api/debug for config + gateway diagnostics",
       ].join("\n");
+
       return res.status(503).type("text/plain").send(hint);
     }
   }
 
-  attachGatewayAuthHeader(req);
   return proxy.web(req, res, { target: GATEWAY_TARGET });
 });
 
@@ -1604,23 +1591,31 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
   // Harden state dir for OpenClaw and avoid missing credentials dir on fresh volumes.
   try {
     fs.mkdirSync(path.join(STATE_DIR, "credentials"), { recursive: true });
-  } catch {}
+  } catch {
+    // ignore
+  }
+
   try {
     fs.chmodSync(STATE_DIR, 0o700);
-  } catch {}
+  } catch {
+    // ignore
+  }
 
   console.log(`[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`);
   console.log(`[wrapper] gateway target: ${GATEWAY_TARGET}`);
+
   if (!SETUP_PASSWORD) {
     console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
   }
 
   // Optional operator hook to install/persist extra tools under /data.
   // This is intentionally best-effort and should be used to set up persistent
-  // prefixes (npm/pnpm/python venv), not to mutate the base image.
+  // prefixes such as npm/pnpm/python venv, not to mutate the base image.
   const bootstrapPath = path.join(WORKSPACE_DIR, "bootstrap.sh");
+
   if (fs.existsSync(bootstrapPath)) {
     console.log(`[wrapper] running bootstrap: ${bootstrapPath}`);
+
     try {
       await runCmd("bash", [bootstrapPath], {
         env: {
@@ -1630,6 +1625,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
         },
         timeoutMs: 10 * 60 * 1000,
       });
+
       console.log("[wrapper] bootstrap complete");
     } catch (err) {
       console.warn(`[wrapper] bootstrap failed (continuing): ${String(err)}`);
@@ -1638,23 +1634,26 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 
   // Sync gateway tokens in config with the current env var on every startup.
   // This prevents "gateway token mismatch" when OPENCLAW_GATEWAY_TOKEN changes
-  // (e.g. Railway variable update) but the config file still has the old value.
+  // but the config file still contains an old value.
   if (isConfigured() && OPENCLAW_GATEWAY_TOKEN) {
     console.log("[wrapper] syncing gateway tokens in config...");
+
     try {
       await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.mode", "token"]));
       await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN]));
       await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.remote.token", OPENCLAW_GATEWAY_TOKEN]));
+
       console.log("[wrapper] gateway tokens synced");
     } catch (err) {
       console.warn(`[wrapper] failed to sync gateway tokens: ${String(err)}`);
     }
   }
 
-  // Auto-start the gateway if already configured so polling channels (Telegram/Discord/etc.)
-  // work even if nobody visits the web UI.
+  // Auto-start the gateway if already configured so polling channels
+  // such as Telegram/Discord keep working even if nobody opens the web UI.
   if (isConfigured()) {
     console.log("[wrapper] config detected; starting gateway...");
+
     try {
       await ensureGatewayRunning();
       console.log("[wrapper] gateway ready");
@@ -1665,33 +1664,29 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 });
 
 server.on("upgrade", async (req, socket, head) => {
-  // Note: browsers cannot attach arbitrary HTTP headers (including Authorization: Basic)
-  // in WebSocket handshakes. Do not enforce dashboard Basic auth at the upgrade layer.
-  // The gateway authenticates at the protocol layer and we inject the gateway token below.
-
   if (!isConfigured()) {
     socket.destroy();
     return;
   }
+
   try {
     await ensureGatewayRunning();
   } catch {
     socket.destroy();
     return;
   }
-  attachGatewayAuthHeader(req);
-  proxy.ws(req, socket, head, { target: GATEWAY_TARGET });
+
+  return proxy.ws(req, socket, head, { target: GATEWAY_TARGET });
 });
 
 process.on("SIGTERM", () => {
-  // Best-effort shutdown
+  // Best-effort shutdown.
   try {
     if (gatewayProc) gatewayProc.kill("SIGTERM");
   } catch {
     // ignore
   }
 
-  // Stop accepting new connections; allow in-flight requests to complete briefly.
   try {
     server.close(() => process.exit(0));
   } catch {
