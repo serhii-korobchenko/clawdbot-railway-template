@@ -24,6 +24,8 @@ WORKDIR /openclaw
 ARG OPENCLAW_GIT_REF=v2026.5.6
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
+RUN pnpm config set minimumReleaseAge 0
+
 # Patch: relax version requirements for packages that may reference unpublished versions.
 RUN set -eux; \
   find ./extensions -name 'package.json' -type f | while read -r f; do \
