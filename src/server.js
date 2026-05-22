@@ -307,6 +307,47 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
+app.post("/gdoc", async (req, res) => {
+  try {
+    const task = String(req.body?.task || "").trim();
+
+    if (!task) {
+      return res.status(400).json({
+        ok: false,
+        error: "missing_task"
+      });
+    }
+
+    const result = await runCmd(
+      "python3",
+      [
+        "/data/workspace/scripts/google_docs_router.py",
+        task
+      ]
+    );
+
+    let parsed;
+
+    try {
+      parsed = JSON.parse(result.output || "{}");
+    } catch {
+      parsed = {
+        ok: false,
+        error: "invalid_router_json",
+        raw_output: result.output || ""
+      };
+    }
+
+    return res.json(parsed);
+
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: String(err)
+    });
+  }
+});
+
 for (const dir of [DOCS_INBOX_DIR, DOCS_LIBRARY_DIR, DOCS_PROCESSED_DIR, DOCS_FAILED_DIR]) {
   fs.mkdirSync(dir, { recursive: true });
 }
