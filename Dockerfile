@@ -21,7 +21,7 @@ RUN corepack enable
 WORKDIR /openclaw
 
 # Pin to a known-good ref (tag/branch). Override in Railway template settings if needed.
-ARG OPENCLAW_GIT_REF=v2026.5.6
+ARG OPENCLAW_GIT_REF=v2026.5.22
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 RUN pnpm config set minimumReleaseAge 0
@@ -34,7 +34,7 @@ RUN set -eux; \
   done
 
 # Disable pnpm minimum release age gate for OpenClaw source build
-RUN node -e "const fs=require('fs'); const p='pnpm-workspace.yaml'; let s=fs.readFileSync(p,'utf8'); s=s.replace(/minimumReleaseAge:\s*[^\n]+/,'minimumReleaseAge: 0'); s=s.replace(/minimumReleaseAgeExclude:\n(?:\s+- .+\n?)*/,'minimumReleaseAgeExclude:\n  - \"@openclaw/fs-safe\"\n'); fs.writeFileSync(p,s);"
+
 
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm build
