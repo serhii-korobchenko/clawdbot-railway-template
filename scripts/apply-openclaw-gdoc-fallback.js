@@ -5,11 +5,11 @@ import path from "node:path";
 const OPENCLAW_DIST = process.env.OPENCLAW_DIST?.trim() || "/openclaw/dist";
 
 function log(message) {
-  console.log(`[gdoc-fallback-patch] ${message}`);
+  console.log("[gdoc-fallback-patch] " + message);
 }
 
 function fail(message) {
-  console.error(`[gdoc-fallback-patch] ERROR: ${message}`);
+  console.error("[gdoc-fallback-patch] ERROR: " + message);
   process.exit(1);
 }
 
