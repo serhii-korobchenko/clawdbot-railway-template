@@ -39,6 +39,11 @@ const STATE_DIR =
 const WORKSPACE_DIR =
   process.env.OPENCLAW_WORKSPACE_DIR?.trim() ||
   path.join(STATE_DIR, "workspace");
+
+const WORKSPACE_SCRIPTS_DIR = path.join(WORKSPACE_DIR, "scripts");
+const REPO_GOOGLE_DOCS_ROUTER = path.join(process.cwd(), "scripts", "google_docs_router.py");
+const WORKSPACE_GOOGLE_DOCS_ROUTER = path.join(WORKSPACE_SCRIPTS_DIR, "google_docs_router.py");
+
 const DOCS_DIR = process.env.DOCS_DIR?.trim() || "/data/workspace/docs";
 const DOCS_INBOX_DIR = path.join(DOCS_DIR, "inbox");
 const DOCS_LIBRARY_DIR = path.join(DOCS_DIR, "library");
@@ -119,6 +124,38 @@ function isConfigured() {
   }
 }
 
+function syncGoogleDocsRouter() {
+  try {
+    if (!fs.existsSync(REPO_GOOGLE_DOCS_ROUTER)) {
+      console.warn("[gdoc-router-sync] repo router not found: " + REPO_GOOGLE_DOCS_ROUTER);
+      return;
+    }
+
+    fs.mkdirSync(WORKSPACE_SCRIPTS_DIR, { recursive: true });
+
+    const source = fs.readFileSync(REPO_GOOGLE_DOCS_ROUTER, "utf8");
+    let current = "";
+
+    try {
+      current = fs.readFileSync(WORKSPACE_GOOGLE_DOCS_ROUTER, "utf8");
+    } catch {
+      current = "";
+    }
+
+    if (source !== current) {
+      fs.writeFileSync(WORKSPACE_GOOGLE_DOCS_ROUTER, source, {
+        encoding: "utf8",
+        mode: 0o755,
+      });
+      console.log("[gdoc-router-sync] synced " + WORKSPACE_GOOGLE_DOCS_ROUTER);
+    } else {
+      console.log("[gdoc-router-sync] already up to date");
+    }
+  } catch (err) {
+    console.error("[gdoc-router-sync] failed: " + String(err));
+  }
+}
+
 // One-time migration: rename legacy config files to openclaw.json so existing
 // deployments that still have the old filename on their volume keep working.
 (function migrateLegacyConfigFile() {
@@ -185,6 +222,7 @@ async function startGateway() {
 
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+  syncGoogleDocsRouter();
 
   const args = [
     "gateway",
