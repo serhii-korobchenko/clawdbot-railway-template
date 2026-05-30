@@ -124,36 +124,44 @@ function isConfigured() {
   }
 }
 
-function syncGoogleDocsRouter() {
+function syncWorkspaceScript(scriptName) {
   try {
-    if (!fs.existsSync(REPO_GOOGLE_DOCS_ROUTER)) {
-      console.warn("[gdoc-router-sync] repo router not found: " + REPO_GOOGLE_DOCS_ROUTER);
+    const repoScript = path.join(process.cwd(), "scripts", scriptName);
+    const workspaceScript = path.join(WORKSPACE_SCRIPTS_DIR, scriptName);
+
+    if (!fs.existsSync(repoScript)) {
+      console.warn("[workspace-script-sync] repo script not found: " + repoScript);
       return;
     }
 
     fs.mkdirSync(WORKSPACE_SCRIPTS_DIR, { recursive: true });
 
-    const source = fs.readFileSync(REPO_GOOGLE_DOCS_ROUTER, "utf8");
+    const source = fs.readFileSync(repoScript, "utf8");
     let current = "";
 
     try {
-      current = fs.readFileSync(WORKSPACE_GOOGLE_DOCS_ROUTER, "utf8");
+      current = fs.readFileSync(workspaceScript, "utf8");
     } catch {
       current = "";
     }
 
     if (source !== current) {
-      fs.writeFileSync(WORKSPACE_GOOGLE_DOCS_ROUTER, source, {
+      fs.writeFileSync(workspaceScript, source, {
         encoding: "utf8",
         mode: 0o755,
       });
-      console.log("[gdoc-router-sync] synced " + WORKSPACE_GOOGLE_DOCS_ROUTER);
+      console.log("[workspace-script-sync] synced " + workspaceScript);
     } else {
-      console.log("[gdoc-router-sync] already up to date");
+      console.log("[workspace-script-sync] already up to date: " + workspaceScript);
     }
   } catch (err) {
-    console.error("[gdoc-router-sync] failed: " + String(err));
+    console.error("[workspace-script-sync] failed for " + scriptName + ": " + String(err));
   }
+}
+
+function syncGoogleDocsRouter() {
+  syncWorkspaceScript("google_docs_router.py");
+  syncWorkspaceScript("google_docs_markdown_cleanup.py");
 }
 
 // One-time migration: rename legacy config files to openclaw.json so existing
