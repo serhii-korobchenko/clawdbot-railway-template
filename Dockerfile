@@ -94,4 +94,4 @@ COPY . /app
 EXPOSE 8080
 
 ENTRYPOINT ["tini", "--"]
-CMD ["sh", "-c", "node scripts/apply-openclaw-gdoc-fallback.js && node src/server.js"]
+CMD ["sh", "-c", "node scripts/apply-openclaw-gdoc-fallback.js || echo '[gdoc-fallback-patch] failed; starting server anyway'; node src/server.js"]
