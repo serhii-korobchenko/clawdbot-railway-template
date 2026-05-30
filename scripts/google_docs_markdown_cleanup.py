@@ -114,7 +114,6 @@ def clean_inline_markdown(value):
     value = re.sub(r"^`(.+)`$", r"\1", value)
     value = value.replace("**", "")
     value = value.replace("__", "")
-    value = value.replace("_", "")
     value = value.replace("`", "")
 
     # Convert [label](url) to "label — url" inside table cells.
