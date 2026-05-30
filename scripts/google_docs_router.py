@@ -267,7 +267,7 @@ def parse_create_task(task):
 
         # Remove trailing instruction fragments.
         text = re.sub(r'\n?\s*Зроби\s+".*$', "", text, flags=re.S)
-        text = re.sub(r"\n?\s*Поверни URL\.?.*$", "", text, flags=re.S | re.I)
+        text = re.sub(r"\n?\s*Поверни\s+(?:raw\s+)?URL\.?.*$", "", text, flags=re.S | re.I)
 
     if not text:
         if is_research_report_task(task):
