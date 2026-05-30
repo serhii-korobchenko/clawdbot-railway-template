@@ -18,6 +18,7 @@ SCRIPTS = {
     "replace": f"{SCRIPT_DIR}/google_docs_replace.py",
     "format": f"{SCRIPT_DIR}/google_docs_format.py",
     "table": f"{SCRIPT_DIR}/google_docs_table.py",
+    "markdown_cleanup": f"{SCRIPT_DIR}/google_docs_markdown_cleanup.py",
 }
 
 
@@ -400,6 +401,12 @@ def handle_create_or_create_format(task):
         "url": url,
         "steps": {"create": created},
     }
+    if doc_id:
+        try:
+            cleanup = run_json(["python3", SCRIPTS["markdown_cleanup"], doc_id])
+            result["steps"]["markdown_cleanup"] = cleanup
+        except Exception as err:
+            result["steps"]["markdown_cleanup_error"] = str(err)
 
     # Best-effort formatting for title / headings.
     if doc_id and ("формат" in task.lower() or "format" in task.lower()):
