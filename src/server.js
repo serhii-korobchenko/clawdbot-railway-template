@@ -186,7 +186,50 @@ function syncGoogleDocsRouter() {
     }
   }
 })();
+// One-time config migration: if IMOU skill is enabled in skills.entries,
+// ensure the main agent can actually see it via agents.defaults.skills.
+// Without this, `openclaw skills list` shows imou-device-video as "excluded".
+(function ensureImouSkillAllowed() {
+  const p = configPath();
 
+  try {
+    if (!fs.existsSync(p)) return;
+
+    const raw = fs.readFileSync(p, "utf8");
+    const cfg = JSON.parse(raw);
+
+    const imouEntry = cfg?.skills?.entries?.["imou-device-video"];
+    if (!imouEntry?.enabled) return;
+
+    cfg.agents ??= {};
+    cfg.agents.defaults ??= {};
+    cfg.agents.defaults.skills ??= [];
+
+    const skills = cfg.agents.defaults.skills;
+
+    if (!Array.isArray(skills)) {
+      console.warn("[migration] agents.defaults.skills exists but is not an array; not modifying IMOU allowlist");
+      return;
+    }
+
+    if (skills.includes("imou-device-video")) return;
+
+    const backupPath = `${p}.bak-imou-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    fs.writeFileSync(backupPath, raw, { encoding: "utf8", mode: 0o600 });
+
+    skills.push("imou-device-video");
+
+    fs.writeFileSync(
+      p,
+      JSON.stringify(cfg, null, 2) + "\n",
+      { encoding: "utf8", mode: 0o600 }
+    );
+
+    console.log("[migration] Added imou-device-video to agents.defaults.skills");
+  } catch (err) {
+    console.warn(`[migration] Failed to ensure IMOU skill allowlist: ${err}`);
+  }
+})();
 let gatewayProc = null;
 let gatewayStarting = null;
 
