@@ -15,7 +15,10 @@ STREAM_ID = os.getenv("IMOU_STREAM_ID", "0")
 DURATION = int(os.getenv("IMOU_AUDIO_DURATION", "10"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID")
+TELEGRAM_TARGET_CHAT_ID = (
+    os.getenv("IMOU_TELEGRAM_TARGET_CHAT_ID")
+    or os.getenv("TELEGRAM_TARGET_CHAT_ID")
+)
 
 SKILL_SCRIPT = "/data/workspace/skills/imou-device-video/scripts/device_video.py"
 OUT_DIR = Path("/data/workspace/imou_audio")
@@ -91,7 +94,7 @@ def transcribe(audio_path: Path) -> str:
 
 def send_telegram(text: str) -> None:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_TARGET_CHAT_ID:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID is missing")
+        raise RuntimeError("TELEGRAM_BOT_TOKEN or IMOU_TELEGRAM_TARGET_CHAT_ID/TELEGRAM_TARGET_CHAT_ID is missing")
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
