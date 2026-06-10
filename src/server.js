@@ -396,6 +396,130 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
+const IMOU_TRANSCRIBE_TOKEN = process.env.IMOU_TRANSCRIBE_TOKEN?.trim() || "";
+const IMOU_TRANSCRIBE_SCRIPT =
+  process.env.IMOU_TRANSCRIBE_SCRIPT?.trim() ||
+  "/app/scripts/imou_audio_to_telegram.py";
+
+let imouTranscribeProc = null;
+
+function getBearerToken(req) {
+  const header = req.headers.authorization || "";
+  const [scheme, token] = header.split(" ");
+  if (scheme?.toLowerCase() === "bearer" && token) return token.trim();
+  return "";
+}
+
+function requireImouTranscribeToken(req, res, next) {
+  if (!IMOU_TRANSCRIBE_TOKEN) {
+    return res.status(500).json({
+      ok: false,
+      error: "IMOU_TRANSCRIBE_TOKEN is not configured",
+    });
+  }
+
+  const token =
+    String(req.headers["x-imou-transcribe-token"] || "").trim() ||
+    getBearerToken(req);
+
+  if (token !== IMOU_TRANSCRIBE_TOKEN) {
+    return res.status(401).json({
+      ok: false,
+      error: "unauthorized",
+    });
+  }
+
+  return next();
+}
+
+app.post("/imou/transcribe-now", requireImouTranscribeToken, (req, res) => {
+  if (imouTranscribeProc) {
+    return res.status(202).json({
+      ok: true,
+      status: "already_running",
+      message: "IMOU transcription is already running",
+    });
+  }
+
+  const duration = String(
+    req.body?.duration ||
+    process.env.IMOU_AUDIO_DURATION ||
+    "15"
+  ).trim();
+
+  const deviceId = String(
+    req.body?.device_id ||
+    req.body?.deviceId ||
+    process.env.IMOU_DEVICE_ID ||
+    "A683BBHPSFD935E"
+  ).trim();
+
+  const channelId = String(
+    req.body?.channel_id ||
+    req.body?.channelId ||
+    process.env.IMOU_CHANNEL_ID ||
+    "0"
+  ).trim();
+
+  const streamId = String(
+    req.body?.stream_id ||
+    req.body?.streamId ||
+    process.env.IMOU_STREAM_ID ||
+    "0"
+  ).trim();
+
+  const childEnv = {
+    ...process.env,
+    IMOU_AUDIO_DURATION: duration,
+    IMOU_DEVICE_ID: deviceId,
+    IMOU_CHANNEL_ID: channelId,
+    IMOU_STREAM_ID: streamId,
+  };
+
+  const startedAt = new Date().toISOString();
+
+  const proc = childProcess.spawn(
+    "python3",
+    [IMOU_TRANSCRIBE_SCRIPT],
+    {
+      cwd: process.cwd(),
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+
+  imouTranscribeProc = proc;
+
+  proc.stdout.on("data", (chunk) => {
+    console.log(`[imou-transcribe] ${String(chunk).trimEnd()}`);
+  });
+
+  proc.stderr.on("data", (chunk) => {
+    console.warn(`[imou-transcribe:stderr] ${String(chunk).trimEnd()}`);
+  });
+
+  proc.on("close", (code, signal) => {
+    console.log(`[imou-transcribe] finished code=${code} signal=${signal || ""}`);
+    imouTranscribeProc = null;
+  });
+
+  proc.on("error", (err) => {
+    console.warn(`[imou-transcribe] failed to start: ${err}`);
+    imouTranscribeProc = null;
+  });
+
+  return res.status(202).json({
+    ok: true,
+    status: "started",
+    started_at: startedAt,
+    device_id: deviceId,
+    channel_id: channelId,
+    stream_id: streamId,
+    duration_seconds: duration,
+  });
+});
+
+
 app.post("/gdoc", async (req, res) => {
   try {
     const task = String(req.body?.task || "").trim();
