@@ -120,10 +120,8 @@ def upsert_source(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[i
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(canonical_url_hash) DO UPDATE SET
             last_seen_at = excluded.last_seen_at,
-            title = COALESCE(excluded.title, sources.title),
-            published_at = COALESCE(excluded.published_at, sources.published_at),
-            source_type = COALESCE(excluded.source_type, sources.source_type),
-            raw_metadata = COALESCE(excluded.raw_metadata, sources.raw_metadata)
+            source_type = COALESCE(sources.source_type, excluded.source_type),
+            raw_metadata = COALESCE(sources.raw_metadata, excluded.raw_metadata)
         """,
         (
             args.url.strip(), canonical_url, canonical_hash, args.title, domain, args.published_at,
