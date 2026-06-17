@@ -25,6 +25,40 @@ PROROK is stored in SQLite at:
 /data/workspace/prorok/prorok.sqlite3
 ```
 
+## Critical routing rule
+
+For every user-facing `/prorok ...` command, run the deterministic router first.
+
+Use exactly this command pattern:
+
+```bash
+python3 /app/prorok/prorok_router.py "<FULL_ORIGINAL_PROROK_COMMAND>"
+```
+
+Examples:
+
+```bash
+python3 /app/prorok/prorok_router.py "/prorok list"
+python3 /app/prorok/prorok_router.py "/prorok show ru_capture_ukraine_oblast_center_2026"
+python3 /app/prorok/prorok_router.py "/prorok trend ru_capture_ukraine_oblast_center_2026"
+python3 /app/prorok/prorok_router.py "/prorok evidence ru_capture_ukraine_oblast_center_2026"
+python3 /app/prorok/prorok_router.py "/prorok sources"
+python3 /app/prorok/prorok_router.py "/prorok health"
+```
+
+Do not choose a helper script yourself for command-style requests. The router is the only allowed entrypoint for `/prorok list`, `/prorok show`, `/prorok trend`, `/prorok evidence`, `/prorok sources`, and `/prorok health`.
+
+This rule is important because different PROROK subcommands are handled by different helper scripts:
+
+- event state: `prorok_event_cli.py`
+- assessment history: `prorok_assessment_cli.py`
+- evidence and sources: `prorok_evidence_cli.py`
+- health: `prorok_cli.py`
+
+Never run `prorok_event_cli.py` for `/prorok trend`, `/prorok evidence`, or `/prorok sources`.
+
+## Supported user commands
+
 Use this skill when the user asks for:
 
 - `/prorok list`
@@ -40,96 +74,45 @@ Use this skill when the user asks for:
 
 ## Runtime path rule
 
-Before running any PROROK command, determine the script directory.
+In Railway deployment, PROROK code is located at:
 
-Use `/app/prorok` in Railway deployment:
-
-```bash
-PROROK_CODE_DIR=/app/prorok
+```text
+/app/prorok
 ```
 
-If `/app/prorok` does not exist during manual runtime tests, use the temporary clone:
+The deterministic router is:
 
-```bash
-PROROK_CODE_DIR=/tmp/prorok-agent-system/prorok
+```text
+/app/prorok/prorok_router.py
 ```
-
-If neither directory exists, report that PROROK code is not available in the runtime container.
 
 Always use the Railway Volume DB home:
 
-```bash
-PROROK_HOME=/data/workspace/prorok
+```text
+/data/workspace/prorok
 ```
 
-## Command mapping
+## Router command mapping
 
-### Health
+The router maps user-facing commands as follows:
 
-For `/prorok health` or PROROK status checks, run:
+| User command | Router dispatch |
+|---|---|
+| `/prorok health` | `prorok_cli.py --home /data/workspace/prorok health` |
+| `/prorok list` | `prorok_event_cli.py --home /data/workspace/prorok list-events --status all` |
+| `/prorok show <event_id>` | `prorok_event_cli.py --home /data/workspace/prorok show-event <event_id>` |
+| `/prorok trend <event_id>` | `prorok_assessment_cli.py --home /data/workspace/prorok trend <event_id>` |
+| `/prorok evidence <event_id>` | `prorok_evidence_cli.py --home /data/workspace/prorok evidence <event_id> --show-canonical` |
+| `/prorok sources` | `prorok_evidence_cli.py --home /data/workspace/prorok sources --show-canonical` |
 
-```bash
-python3 "$PROROK_CODE_DIR/prorok_cli.py" --home "$PROROK_HOME" health
-```
-
-Return the DB path, counts, and schema health summary.
-
-### List events
-
-For `/prorok list`, run:
-
-```bash
-python3 "$PROROK_CODE_DIR/prorok_event_cli.py" --home "$PROROK_HOME" list-events --status all
-```
-
-Return event title, event_id, status, forecast horizon, latest probability, confidence, and assessment time.
-
-### Show one event
-
-For `/prorok show <event_id>`, run:
-
-```bash
-python3 "$PROROK_CODE_DIR/prorok_event_cli.py" --home "$PROROK_HOME" show-event "<event_id>"
-```
-
-Return the event card and latest assessment. If the event is not found, say so clearly and suggest `/prorok list`.
-
-### Assessment trend
-
-For `/prorok trend <event_id>`, run:
-
-```bash
-python3 "$PROROK_CODE_DIR/prorok_assessment_cli.py" --home "$PROROK_HOME" trend "<event_id>"
-```
-
-Return assessment history with probability, label, confidence, delta_from_previous, and rationale.
-
-### Evidence for one event
-
-For `/prorok evidence <event_id>`, run:
-
-```bash
-python3 "$PROROK_CODE_DIR/prorok_evidence_cli.py" --home "$PROROK_HOME" evidence "<event_id>" --show-canonical
-```
-
-Return evidence rows grouped by indicator/counterindicator/neutral when useful. Preserve source URLs and canonical URLs.
-
-### Source registry
-
-For `/prorok sources`, run:
-
-```bash
-python3 "$PROROK_CODE_DIR/prorok_evidence_cli.py" --home "$PROROK_HOME" sources --show-canonical
-```
-
-Return source_id, domain, used count, title, URL, and canonical URL.
+Return the meaningful router output to the user. Keep Telegram replies concise by default.
 
 ## Adding events
 
-When the user asks to add a forecast event manually, use:
+For manual event creation requests, prefer direct CLI only when the user explicitly asks to add or update a forecast event.
 
 ```bash
-python3 "$PROROK_CODE_DIR/prorok_event_cli.py" --home "$PROROK_HOME" add-event \
+python3 /app/prorok/prorok_event_cli.py --home /data/workspace/prorok add-event \
   --event-id "<stable_event_id>" \
   --title "<title>" \
   --question "<forecast_question>" \
@@ -139,14 +122,14 @@ python3 "$PROROK_CODE_DIR/prorok_event_cli.py" --home "$PROROK_HOME" add-event \
   --source-image-note "<source note>"
 ```
 
-Use a stable ASCII `event_id` such as `ukraine_ceasefire_2026` or `ru_capture_oblast_center_2026`. Do not create duplicate events for the same forecast question. If unsure, run `/prorok list` first.
+Use a stable ASCII `event_id` such as `ukraine_ceasefire_2026` or `ru_capture_oblast_center_2026`. Do not create duplicate events for the same forecast question. If unsure, run `/prorok list` first through the router.
 
 ## Adding evidence
 
-When the user asks to attach evidence to an event, use:
+For evidence attachment requests, use:
 
 ```bash
-python3 "$PROROK_CODE_DIR/prorok_evidence_cli.py" --home "$PROROK_HOME" add-evidence \
+python3 /app/prorok/prorok_evidence_cli.py --home /data/workspace/prorok add-evidence \
   "<event_id>" \
   --url "<source_url>" \
   --title "<source_title>" \
@@ -157,7 +140,7 @@ python3 "$PROROK_CODE_DIR/prorok_evidence_cli.py" --home "$PROROK_HOME" add-evid
   --credibility 60
 ```
 
-Allowed `direction` values are:
+Allowed `direction` values:
 
 ```text
 indicator
@@ -165,7 +148,7 @@ counterindicator
 neutral
 ```
 
-Allowed `strength` values are:
+Allowed `strength` values:
 
 ```text
 weak
@@ -177,10 +160,10 @@ The source registry deduplicates by canonical URL hash. Tracking parameters such
 
 ## Adding assessments
 
-When the user asks to add or update a probability assessment, use:
+For probability assessment updates, use:
 
 ```bash
-python3 "$PROROK_CODE_DIR/prorok_assessment_cli.py" --home "$PROROK_HOME" add-assessment \
+python3 /app/prorok/prorok_assessment_cli.py --home /data/workspace/prorok add-assessment \
   "<event_id>" \
   --probability <0-100> \
   --band "<probability_band>" \
@@ -189,7 +172,7 @@ python3 "$PROROK_CODE_DIR/prorok_assessment_cli.py" --home "$PROROK_HOME" add-as
   --rationale "<rationale>"
 ```
 
-Allowed confidence values are:
+Allowed confidence values:
 
 ```text
 low
@@ -214,10 +197,9 @@ Assessments must be appended, not overwritten. The CLI calculates `delta_from_pr
 ## Output rules
 
 - Do not answer PROROK state from memory.
-- Always run the relevant CLI command.
-- Keep Telegram replies concise by default.
+- For `/prorok ...` commands, always run `python3 /app/prorok/prorok_router.py "<FULL_ORIGINAL_PROROK_COMMAND>"` first.
 - Preserve event IDs exactly.
-- If a command fails, return the error and the command category that failed.
+- If a command fails, return the error and say which PROROK command failed.
 - Do not claim that a database update succeeded unless the CLI prints `OK:`.
 - For source/evidence output, include enough URL information to verify deduplication.
 
@@ -226,8 +208,9 @@ Assessments must be appended, not overwritten. The CLI calculates `delta_from_pr
 Use this command sequence to validate that the skill can see the runtime database:
 
 ```bash
-if [ -d /app/prorok ]; then PROROK_CODE_DIR=/app/prorok; else PROROK_CODE_DIR=/tmp/prorok-agent-system/prorok; fi
-PROROK_HOME=/data/workspace/prorok
-python3 "$PROROK_CODE_DIR/prorok_cli.py" --home "$PROROK_HOME" health
-python3 "$PROROK_CODE_DIR/prorok_event_cli.py" --home "$PROROK_HOME" list-events --status all
+python3 /app/prorok/prorok_router.py "/prorok health"
+python3 /app/prorok/prorok_router.py "/prorok list"
+python3 /app/prorok/prorok_router.py "/prorok trend ru_capture_ukraine_oblast_center_2026"
+python3 /app/prorok/prorok_router.py "/prorok evidence ru_capture_ukraine_oblast_center_2026"
+python3 /app/prorok/prorok_router.py "/prorok sources"
 ```
