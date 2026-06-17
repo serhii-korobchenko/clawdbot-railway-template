@@ -42,7 +42,7 @@ Main tables:
 
 ```text
 events
-author assessments
+assessments
 sources
 evidence_items
 runs
