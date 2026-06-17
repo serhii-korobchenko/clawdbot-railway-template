@@ -191,7 +191,41 @@ def cmd_list_events(args: argparse.Namespace) -> int:
 def cmd_show_event(args: argparse.Namespace) -> int:
     db_path = resolve_db(args)
     with connect(db_path) as conn:
-        row = fetch_one(conn, "SELECT * FROM latest_event_state WHERE event_id = ?", (args.event_id,))
+        row = fetch_one(
+            conn,
+            """
+            SELECT
+                e.event_id,
+                e.title,
+                e.question,
+                e.status,
+                e.forecast_horizon,
+                e.decision_criteria,
+                e.tags,
+                e.source_image_note,
+                e.created_at,
+                e.updated_at,
+                a.assessment_id,
+                a.assessed_at,
+                a.probability_percent,
+                a.probability_band,
+                a.probability_label,
+                a.confidence,
+                a.delta_from_previous,
+                a.rationale
+            FROM events e
+            LEFT JOIN assessments a
+              ON a.assessment_id = (
+                SELECT assessment_id
+                FROM assessments
+                WHERE event_id = e.event_id
+                ORDER BY assessed_at DESC, assessment_id DESC
+                LIMIT 1
+              )
+            WHERE e.event_id = ?
+            """,
+            (args.event_id,),
+        )
         if row is None:
             raise CliError(f"Event not found: {args.event_id}")
     print(f"PROROK event: {row['event_id']}")
