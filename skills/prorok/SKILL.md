@@ -7,6 +7,8 @@ description: >
   tracking, probability trends, evidence lists, source deduplication checks, and
   PROROK health checks.
 user-invocable: true
+command-dispatch: tool
+command-tool: prorok_query
 metadata:
   openclaw:
     always: true
