@@ -16,7 +16,9 @@ RUN apt-get update \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
-RUN corepack enable
+# Pin pnpm in the build stage as well. Without this, Corepack may download
+# the latest pnpm release, making OpenClaw source builds slower and less stable.
+RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /openclaw
 
