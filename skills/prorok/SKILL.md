@@ -17,36 +17,42 @@ metadata:
 
 # PROROK Forecasting Skill
 
-This skill exposes the local PROROK forecasting database and CLI helpers to OpenClaw native skill commands.
+This skill exposes the local PROROK forecasting database and CLI helpers to OpenClaw.
 
-PROROK is stored in SQLite at:
+PROROK runtime data is stored in SQLite at:
 
 ```text
 /data/workspace/prorok/prorok.sqlite3
 ```
 
-## Critical routing rule
+## Critical execution rule
 
-For every user-facing `/prorok ...` command, run the deterministic router first.
+For every user-facing `/prorok ...` command, use the deterministic local tool dispatch first.
 
-Use exactly this command pattern:
+Use this tool name exactly:
+
+```text
+prorok_query
+```
+
+Pass the full original user command as the tool input, for example:
+
+```text
+/prorok list
+/prorok show ru_capture_ukraine_oblast_center_2026
+/prorok trend ru_capture_ukraine_oblast_center_2026
+/prorok evidence ru_capture_ukraine_oblast_center_2026
+/prorok sources
+/prorok health
+```
+
+Do not answer `/prorok ...` commands from memory. Do not use web search for `/prorok list`, `/prorok show`, `/prorok trend`, `/prorok evidence`, `/prorok sources`, or `/prorok health`.
+
+Do not manually query SQLite with `sqlite3`. Do not choose a helper script yourself for command-style requests. The runtime fallback for `prorok_query` calls:
 
 ```bash
 python3 /app/prorok/prorok_router.py "<FULL_ORIGINAL_PROROK_COMMAND>"
 ```
-
-Examples:
-
-```bash
-python3 /app/prorok/prorok_router.py "/prorok list"
-python3 /app/prorok/prorok_router.py "/prorok show ru_capture_ukraine_oblast_center_2026"
-python3 /app/prorok/prorok_router.py "/prorok trend ru_capture_ukraine_oblast_center_2026"
-python3 /app/prorok/prorok_router.py "/prorok evidence ru_capture_ukraine_oblast_center_2026"
-python3 /app/prorok/prorok_router.py "/prorok sources"
-python3 /app/prorok/prorok_router.py "/prorok health"
-```
-
-Do not choose a helper script yourself for command-style requests. The router is the only allowed entrypoint for `/prorok list`, `/prorok show`, `/prorok trend`, `/prorok evidence`, `/prorok sources`, and `/prorok health`.
 
 This rule is important because different PROROK subcommands are handled by different helper scripts:
 
@@ -59,7 +65,7 @@ Never run `prorok_event_cli.py` for `/prorok trend`, `/prorok evidence`, or `/pr
 
 ## Supported user commands
 
-Use this skill when the user asks for:
+Use `prorok_query` when the user asks for:
 
 - `/prorok list`
 - `/prorok show <event_id>`
@@ -70,7 +76,8 @@ Use this skill when the user asks for:
 - current PROROK event state
 - probability history or trend
 - evidence, indicators, counterindicators, source registry, or source deduplication
-- adding or updating PROROK forecast events, evidence, or assessments
+
+Return the meaningful `prorok_query` output to the user. Keep Telegram replies concise by default.
 
 ## Runtime path rule
 
@@ -105,8 +112,6 @@ The router maps user-facing commands as follows:
 | `/prorok evidence <event_id>` | `prorok_evidence_cli.py --home /data/workspace/prorok evidence <event_id> --show-canonical` |
 | `/prorok sources` | `prorok_evidence_cli.py --home /data/workspace/prorok sources --show-canonical` |
 
-Return the meaningful router output to the user. Keep Telegram replies concise by default.
-
 ## Adding events
 
 For manual event creation requests, prefer direct CLI only when the user explicitly asks to add or update a forecast event.
@@ -122,7 +127,7 @@ python3 /app/prorok/prorok_event_cli.py --home /data/workspace/prorok add-event 
   --source-image-note "<source note>"
 ```
 
-Use a stable ASCII `event_id` such as `ukraine_ceasefire_2026` or `ru_capture_oblast_center_2026`. Do not create duplicate events for the same forecast question. If unsure, run `/prorok list` first through the router.
+Use a stable ASCII `event_id` such as `ukraine_ceasefire_2026` or `ru_capture_oblast_center_2026`. Do not create duplicate events for the same forecast question. If unsure, run `/prorok list` first through `prorok_query`.
 
 ## Adding evidence
 
@@ -196,8 +201,8 @@ Assessments must be appended, not overwritten. The CLI calculates `delta_from_pr
 
 ## Output rules
 
+- For `/prorok ...` commands, always dispatch `prorok_query` with the full original command first.
 - Do not answer PROROK state from memory.
-- For `/prorok ...` commands, always run `python3 /app/prorok/prorok_router.py "<FULL_ORIGINAL_PROROK_COMMAND>"` first.
 - Preserve event IDs exactly.
 - If a command fails, return the error and say which PROROK command failed.
 - Do not claim that a database update succeeded unless the CLI prints `OK:`.
@@ -205,7 +210,7 @@ Assessments must be appended, not overwritten. The CLI calculates `delta_from_pr
 
 ## Manual runtime check
 
-Use this command sequence to validate that the skill can see the runtime database:
+Use this command sequence to validate that the runtime router can see the database:
 
 ```bash
 python3 /app/prorok/prorok_router.py "/prorok health"
