@@ -10,9 +10,15 @@ This script accepts the user-facing PROROK command form, for example:
     /prorok sources
     /prorok health
 
-It then dispatches to the correct PROROK CLI helper. The goal is to keep
-OpenClaw skill execution deterministic and avoid the model choosing the wrong
-helper script for subcommands such as trend/evidence/sources.
+Write commands are also supported and are passed through to the lower-level
+PROROK CLI helpers:
+
+    /prorok add-event --event-id example_2026 --title "..." --question "..."
+    /prorok assess example_2026 --probability 35 --band "25-35%" --label "Малоймовірно" --rationale "..."
+    /prorok add-evidence example_2026 --url "https://..." --direction indicator --summary "..."
+
+The goal is to keep OpenClaw skill execution deterministic and avoid the model
+choosing the wrong helper script for PROROK subcommands.
 """
 
 from __future__ import annotations
@@ -84,13 +90,27 @@ def run_python(script: Path, args: Sequence[str], home: str) -> int:
 
 def usage() -> str:
     return """PROROK commands:
-  /prorok list
-  /prorok show <event_id>
-  /prorok trend <event_id>
-  /prorok evidence <event_id>
-  /prorok sources
-  /prorok health
+  Read/state:
+    /prorok list
+    /prorok show <event_id>
+    /prorok trend <event_id>
+    /prorok latest <event_id>
+    /prorok evidence <event_id>
+    /prorok sources
+    /prorok health
+
+  Write/update:
+    /prorok add-event --event-id <id> --title "<title>" --question "<question>" [--forecast-horizon YYYY-MM-DD] [--criteria "..."] [--tags "a,b,c"]
+    /prorok assess <event_id> --probability <0-100> --band "<band>" --label "<label>" [--confidence low|medium|high] --rationale "<text>"
+    /prorok add-evidence <event_id> --url "<url>" --direction indicator|counterindicator|neutral --summary "<text>" [--title "..."] [--strength weak|medium|strong] [--relevance 0-100] [--credibility 0-100]
 """.rstrip()
+
+
+def require_args(rest: Sequence[str], message: str) -> bool:
+    if rest:
+        return True
+    print(message, file=sys.stderr)
+    return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -122,20 +142,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_python(code_dir / "prorok_event_cli.py", ["list-events", "--status", "all"], args.home)
 
     if subcommand == "show":
-        if not rest:
-            print("Missing event_id. Usage: /prorok show <event_id>", file=sys.stderr)
+        if not require_args(rest, "Missing event_id. Usage: /prorok show <event_id>"):
             return 2
         return run_python(code_dir / "prorok_event_cli.py", ["show-event", rest[0]], args.home)
 
     if subcommand == "trend":
-        if not rest:
-            print("Missing event_id. Usage: /prorok trend <event_id>", file=sys.stderr)
+        if not require_args(rest, "Missing event_id. Usage: /prorok trend <event_id>"):
             return 2
         return run_python(code_dir / "prorok_assessment_cli.py", ["trend", rest[0]], args.home)
 
+    if subcommand == "latest":
+        if not require_args(rest, "Missing event_id. Usage: /prorok latest <event_id>"):
+            return 2
+        return run_python(code_dir / "prorok_assessment_cli.py", ["latest", rest[0]], args.home)
+
     if subcommand == "evidence":
-        if not rest:
-            print("Missing event_id. Usage: /prorok evidence <event_id>", file=sys.stderr)
+        if not require_args(rest, "Missing event_id. Usage: /prorok evidence <event_id>"):
             return 2
         return run_python(
             code_dir / "prorok_evidence_cli.py",
@@ -145,6 +167,33 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if subcommand in {"sources", "source", "source-registry", "registry"}:
         return run_python(code_dir / "prorok_evidence_cli.py", ["sources", "--show-canonical"], args.home)
+
+    if subcommand in {"add-event", "create-event", "event-add"}:
+        if not rest:
+            print(
+                "Missing add-event arguments. Usage: /prorok add-event --event-id <id> --title \"<title>\" --question \"<question>\"",
+                file=sys.stderr,
+            )
+            return 2
+        return run_python(code_dir / "prorok_event_cli.py", ["add-event", *rest], args.home)
+
+    if subcommand in {"assess", "add-assessment", "assessment", "assessment-add"}:
+        if not rest:
+            print(
+                "Missing assessment arguments. Usage: /prorok assess <event_id> --probability <0-100> --band \"<band>\" --label \"<label>\" --rationale \"<text>\"",
+                file=sys.stderr,
+            )
+            return 2
+        return run_python(code_dir / "prorok_assessment_cli.py", ["add-assessment", *rest], args.home)
+
+    if subcommand in {"add-evidence", "evidence-add", "add-source", "source-add"}:
+        if not rest:
+            print(
+                "Missing evidence arguments. Usage: /prorok add-evidence <event_id> --url \"<url>\" --direction indicator|counterindicator|neutral --summary \"<text>\"",
+                file=sys.stderr,
+            )
+            return 2
+        return run_python(code_dir / "prorok_evidence_cli.py", ["add-evidence", *rest], args.home)
 
     print(f"Unknown PROROK command: {subcommand}\n\n{usage()}", file=sys.stderr)
     return 2
