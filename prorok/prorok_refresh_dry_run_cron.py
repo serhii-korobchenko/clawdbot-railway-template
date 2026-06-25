@@ -175,14 +175,25 @@ latest_rationale: {latest.rationale}
 {evidence_text}
 
 Завдання пошуку:
-1. Знайди нові або релевантні після last_assessed_at матеріали щодо події.
-2. Відібери максимум 6 кандидатів evidence:
-   - 3 indicator або менше;
-   - 3 counterindicator або менше;
-   - лише конкретні статті або офіційні сторінки;
-   - не використовуй соцмережі як основне джерело;
-   - не дублюй уже внесені джерела, якщо це очевидний повтор;
-   - якщо матеріал старіший за last_assessed_at, познач duplicate_risk як high або поясни, чому він все одно релевантний.
+1. Знайди тільки нові або суттєво релевантні після last_assessed_at матеріали щодо події.
+2. Відібери максимум 3 candidate evidence. Краще повернути NO_NEW_EVIDENCE_FOUND, ніж слабкі або дубльовані джерела.
+3. Прийнятні джерела: конкретні статті великих медіа, офіційні заяви/документи урядів або міжнародних організацій, авторитетні think tanks, профільні безпекові інститути.
+4. Заборонено включати як evidence:
+   - Wikipedia;
+   - Medium, Substack, персональні блоги, форуми, Reddit, YouTube, TikTok, X/Twitter, Facebook;
+   - SEO/evergreen сторінки без нової подієвої інформації;
+   - сценарні opinion pieces без нових фактів;
+   - джерела, які не можна перевірити або які містять лише загальний фон.
+5. Дублювання:
+   - якщо canonical_url вже є в evidence baseline, не включай це джерело;
+   - якщо це переказ уже внесеної статті або того самого wire-story, не включай;
+   - якщо все ж включаєш старіший матеріал як missed_baseline_evidence, duplicate_risk має бути high і треба чітко пояснити, чому він важливий.
+6. Freshness rule:
+   - за замовчуванням включай тільки матеріали після last_assessed_at;
+   - матеріали до last_assessed_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
+7. Assessment rule:
+   - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
+   - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
 
 Формат фінальної відповіді:
 
@@ -190,6 +201,12 @@ PROROK_REFRESH_DRY_RUN
 event_id: {event.event_id}
 baseline_probability: {latest.probability}
 search_window: <коротко>
+
+CANDIDATE_EVIDENCE:
+NO_NEW_EVIDENCE_FOUND
+reason: <1-3 речення, якщо нових якісних джерел немає>
+
+АБО, якщо є справді якісні нові джерела:
 
 CANDIDATE_EVIDENCE:
 1.
@@ -204,6 +221,7 @@ published_at: ...
 summary: 1-2 речення
 why_it_matters: 1-2 речення
 duplicate_risk: low|medium|high
+freshness: new_after_last_assessment|missed_baseline_evidence
 
 ASSESSMENT_RECOMMENDATION:
 recommended_probability: <число або n/a>
