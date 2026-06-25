@@ -194,6 +194,9 @@ latest_rationale: {latest.rationale}
 7. Assessment rule:
    - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
    - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
+8. Probability wording rule:
+   - не називай band 10-20% “середньою ймовірністю”; це завжди “низька ймовірність”;
+   - слово medium може стосуватися тільки confidence, strength або quality, але не probability band.
 
 Формат фінальної відповіді:
 
