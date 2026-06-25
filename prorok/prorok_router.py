@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic PROROK command router for OpenClaw skills.
-
-This script accepts the user-facing PROROK command form, for example:
-
-    /prorok list
-    /prorok show example_event_2026
-    /prorok trend example_event_2026
-    /prorok evidence example_event_2026
-    /prorok sources
-    /prorok health
-    /prorok refresh example_event_2026
-
-Write commands are also supported and are passed through to the lower-level
-PROROK CLI helpers.
-
-The goal is to keep OpenClaw skill execution deterministic and avoid the model
-choosing the wrong helper script for PROROK subcommands.
-"""
+"""Deterministic PROROK command router for OpenClaw skills."""
 
 from __future__ import annotations
 
@@ -32,7 +15,6 @@ DEFAULT_HOME = "/data/workspace/prorok"
 
 
 def resolve_code_dir() -> Path:
-    """Resolve the deployed PROROK code directory."""
     explicit = os.getenv("PROROK_CODE_DIR")
     if explicit:
         path = Path(explicit)
@@ -40,82 +22,58 @@ def resolve_code_dir() -> Path:
             return path
         raise SystemExit(f"PROROK_CODE_DIR does not exist: {path}")
 
-    candidates = [
-        Path(__file__).resolve().parent,
-        Path("/app/prorok"),
-        Path("/tmp/prorok-agent-system/prorok"),
-    ]
+    candidates = [Path(__file__).resolve().parent, Path("/app/prorok"), Path("/tmp/prorok-agent-system/prorok")]
     for path in candidates:
         if (path / "prorok_cli.py").exists():
             return path
-
-    raise SystemExit(
-        "PROROK code is not available. Expected /app/prorok or "
-        "/tmp/prorok-agent-system/prorok."
-    )
+    raise SystemExit("PROROK code is not available. Expected /app/prorok or /tmp/prorok-agent-system/prorok.")
 
 
 def normalize_command(raw: str) -> list[str]:
     text = (raw or "").strip()
     if not text:
         return []
-
     try:
         parts = shlex.split(text)
     except ValueError as exc:
         raise SystemExit(f"Could not parse PROROK command: {exc}") from exc
-
-    if parts and parts[0].lower() == "/prorok":
+    if parts and parts[0].lower() in {"/prorok", "prorok"}:
         parts = parts[1:]
-    elif parts and parts[0].lower() == "prorok":
-        parts = parts[1:]
-
     return parts
 
 
 def run_python(script: Path, args: Sequence[str], home: str) -> int:
-    cmd = [sys.executable, str(script), "--home", home, *args]
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
+    proc = subprocess.run([sys.executable, str(script), "--home", home, *args], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.stdout:
         print(proc.stdout.rstrip())
     if proc.stderr:
         print(proc.stderr.rstrip(), file=sys.stderr)
-
     return proc.returncode
 
 
 def run_plain_python(script: Path, args: Sequence[str]) -> int:
-    cmd = [sys.executable, str(script), *args]
-    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
+    proc = subprocess.run([sys.executable, str(script), *args], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.stdout:
         print(proc.stdout.rstrip())
     if proc.stderr:
         print(proc.stderr.rstrip(), file=sys.stderr)
-
     return proc.returncode
 
 
 def usage() -> str:
     return """PROROK commands:
-  Read/state:
-    /prorok list
-    /prorok show <event_id>
-    /prorok trend <event_id>
-    /prorok latest <event_id>
-    /prorok evidence <event_id>
-    /prorok sources
-    /prorok health
-
-  Refresh dry-run:
-    /prorok refresh <event_id> [--to <telegram_chat_id>] [--thread-id <topic_id>] [--at 2m] [--no-schedule]
-
-  Write/update:
-    /prorok add-event --event-id <id> --title "<title>" --question "<question>" [--forecast-horizon YYYY-MM-DD] [--criteria "..."] [--tags "a,b,c"]
-    /prorok assess <event_id> --probability <0-100> --band "<band>" --label "<label>" [--confidence low|medium|high] --rationale "<text>"
-    /prorok add-evidence <event_id> --url "<url>" --direction indicator|counterindicator|neutral --summary "<text>" [--title "..."] [--strength weak|medium|strong] [--relevance 0-100] [--credibility 0-100]
-""".rstrip()
+  /prorok list
+  /prorok show <event_id>
+  /prorok trend <event_id>
+  /prorok latest <event_id>
+  /prorok evidence <event_id>
+  /prorok sources
+  /prorok health
+  /prorok refresh <event_id> [--to <chat_id>] [--thread-id <topic_id>] [--at 2m] [--no-schedule]
+  /prorok refresh-all [--status active] [--limit 50] [--start-at 2m] [--spacing-minutes 3] [--to <chat_id>] [--thread-id <topic_id>] [--no-schedule]
+  /prorok add-event ...
+  /prorok assess ...
+  /prorok add-evidence ...""".rstrip()
 
 
 def require_args(rest: Sequence[str], message: str) -> bool:
@@ -131,89 +89,68 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--home", default=os.getenv("PROROK_HOME", DEFAULT_HOME), help="PROROK home directory")
     args = parser.parse_args(argv)
 
-    # Accept either one quoted raw command or multiple split tokens.
-    raw = " ".join(args.command).strip()
-    parts = normalize_command(raw)
+    parts = normalize_command(" ".join(args.command).strip())
     if not parts:
         print(usage())
         return 2
 
     subcommand = parts[0].lower()
     rest = parts[1:]
-
     code_dir = resolve_code_dir()
 
     if subcommand in {"help", "--help", "-h"}:
         print(usage())
         return 0
-
     if subcommand in {"health", "status"}:
         return run_python(code_dir / "prorok_cli.py", ["health"], args.home)
-
     if subcommand in {"list", "events"}:
         return run_python(code_dir / "prorok_event_cli.py", ["list-events", "--status", "all"], args.home)
-
     if subcommand == "show":
         if not require_args(rest, "Missing event_id. Usage: /prorok show <event_id>"):
             return 2
         return run_python(code_dir / "prorok_event_cli.py", ["show-event", rest[0]], args.home)
-
     if subcommand == "trend":
         if not require_args(rest, "Missing event_id. Usage: /prorok trend <event_id>"):
             return 2
         return run_python(code_dir / "prorok_assessment_cli.py", ["trend", rest[0]], args.home)
-
     if subcommand == "latest":
         if not require_args(rest, "Missing event_id. Usage: /prorok latest <event_id>"):
             return 2
         return run_python(code_dir / "prorok_assessment_cli.py", ["latest", rest[0]], args.home)
-
     if subcommand == "evidence":
         if not require_args(rest, "Missing event_id. Usage: /prorok evidence <event_id>"):
             return 2
-        return run_python(
-            code_dir / "prorok_evidence_cli.py",
-            ["evidence", rest[0], "--show-canonical"],
-            args.home,
-        )
-
+        return run_python(code_dir / "prorok_evidence_cli.py", ["evidence", rest[0], "--show-canonical"], args.home)
     if subcommand in {"sources", "source", "source-registry", "registry"}:
         return run_python(code_dir / "prorok_evidence_cli.py", ["sources", "--show-canonical"], args.home)
-
+    if subcommand in {"refresh-all", "refresh-all-dry-run", "dry-run-all"}:
+        script = code_dir / "prorok_refresh_all_dry_run_quiet.py"
+        if not script.exists():
+            print(f"PROROK refresh-all launcher is not available: {script}", file=sys.stderr)
+            return 2
+        return run_plain_python(script, rest)
     if subcommand in {"refresh", "dry-run", "refresh-dry-run"}:
         if not require_args(rest, "Missing event_id. Usage: /prorok refresh <event_id>"):
             return 2
-        quiet_refresh = code_dir / "prorok_refresh_dry_run_quiet.py"
-        refresh_script = quiet_refresh if quiet_refresh.exists() else code_dir / "prorok_refresh_dry_run_cron.py"
-        if not refresh_script.exists():
-            print(f"PROROK refresh launcher is not available: {refresh_script}", file=sys.stderr)
+        quiet = code_dir / "prorok_refresh_dry_run_quiet.py"
+        script = quiet if quiet.exists() else code_dir / "prorok_refresh_dry_run_cron.py"
+        if not script.exists():
+            print(f"PROROK refresh launcher is not available: {script}", file=sys.stderr)
             return 2
-        return run_plain_python(refresh_script, rest)
-
+        return run_plain_python(script, rest)
     if subcommand in {"add-event", "create-event", "event-add"}:
         if not rest:
-            print(
-                "Missing add-event arguments. Usage: /prorok add-event --event-id <id> --title \"<title>\" --question \"<question>\"",
-                file=sys.stderr,
-            )
+            print("Missing add-event arguments.", file=sys.stderr)
             return 2
         return run_python(code_dir / "prorok_event_cli.py", ["add-event", *rest], args.home)
-
     if subcommand in {"assess", "add-assessment", "assessment", "assessment-add"}:
         if not rest:
-            print(
-                "Missing assessment arguments. Usage: /prorok assess <event_id> --probability <0-100> --band \"<band>\" --label \"<label>\" --rationale \"<text>\"",
-                file=sys.stderr,
-            )
+            print("Missing assessment arguments.", file=sys.stderr)
             return 2
         return run_python(code_dir / "prorok_assessment_cli.py", ["add-assessment", *rest], args.home)
-
     if subcommand in {"add-evidence", "evidence-add", "add-source", "source-add"}:
         if not rest:
-            print(
-                "Missing evidence arguments. Usage: /prorok add-evidence <event_id> --url \"<url>\" --direction indicator|counterindicator|neutral --summary \"<text>\"",
-                file=sys.stderr,
-            )
+            print("Missing evidence arguments.", file=sys.stderr)
             return 2
         return run_python(code_dir / "prorok_evidence_cli.py", ["add-evidence", *rest], args.home)
 
