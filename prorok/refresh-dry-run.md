@@ -14,6 +14,23 @@ web refresh -> candidate evidence -> human review -> /prorok add-evidence and /p
 
 The launcher does **not** call `/prorok add-evidence` or `/prorok assess`, and the prompt tells the agent not to call them either.
 
+## Telegram command
+
+The deterministic PROROK router exposes the refresh dry-run as a Telegram/OpenClaw command:
+
+```text
+/prorok refresh Nuclear_threat
+```
+
+Optional flags can be forwarded to the launcher:
+
+```text
+/prorok refresh Nuclear_threat --thread-id 112 --at 2m
+/prorok refresh Nuclear_threat --no-schedule
+```
+
+The command creates a one-shot cron job and sends the final dry-run report to the configured Telegram topic. It does not write anything to the PROROK database.
+
 ## Typical Railway command
 
 ```bash
