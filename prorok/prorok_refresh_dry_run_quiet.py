@@ -2,9 +2,13 @@
 """Quiet wrapper for PROROK refresh dry-run launcher.
 
 The underlying launcher calls `openclaw cron add`, whose stdout can include the full
-cron payload and therefore the full refresh prompt. This wrapper monkey-patches only
-that subprocess call so the Telegram command returns a compact confirmation instead
-of a very large JSON object.
+cron payload and therefore the full refresh prompt. This wrapper monkey-patches that
+subprocess call so the Telegram command returns a compact confirmation instead of a
+very large JSON object.
+
+It also appends a small prompt guard used by the Telegram command path: when the
+refresh result is NO_NEW_EVIDENCE_FOUND, the final rationale must not introduce new
+factual claims that are not listed as candidate evidence.
 """
 
 from __future__ import annotations
@@ -19,6 +23,22 @@ import prorok_refresh_dry_run_cron as launcher
 
 SUMMARY: dict[str, str] = {}
 REAL_RUN = subprocess.run
+REAL_BUILD_PROMPT = launcher.build_prompt
+
+NO_NEW_EVIDENCE_GUARD = """9. No-new-evidence rationale rule:
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, rationale не має вводити нові фактичні твердження, яких немає в candidate evidence;
+   - у такому випадку rationale має пояснювати лише відсутність нових якісних джерел і причину no_update.
+"""
+
+
+def guarded_build_prompt(*args: Any, **kwargs: Any) -> str:
+    prompt = REAL_BUILD_PROMPT(*args, **kwargs)
+    marker = "\nФормат фінальної відповіді:"
+    if NO_NEW_EVIDENCE_GUARD in prompt:
+        return prompt
+    if marker in prompt:
+        return prompt.replace(marker, "\n" + NO_NEW_EVIDENCE_GUARD + marker, 1)
+    return prompt + "\n\n" + NO_NEW_EVIDENCE_GUARD
 
 
 def _extract_summary(stdout: str) -> dict[str, str]:
@@ -66,6 +86,7 @@ def quiet_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
 
 def main(argv: list[str]) -> int:
     launcher.subprocess.run = quiet_run
+    launcher.build_prompt = guarded_build_prompt
     result = launcher.main(argv)
     if result == 0:
         if SUMMARY.get("cron_id"):
