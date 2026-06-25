@@ -4,19 +4,15 @@
 This script accepts the user-facing PROROK command form, for example:
 
     /prorok list
-    /prorok show ru_capture_ukraine_oblast_center_2026
-    /prorok trend ru_capture_ukraine_oblast_center_2026
-    /prorok evidence ru_capture_ukraine_oblast_center_2026
+    /prorok show example_event_2026
+    /prorok trend example_event_2026
+    /prorok evidence example_event_2026
     /prorok sources
     /prorok health
-    /prorok refresh Nuclear_threat
+    /prorok refresh example_event_2026
 
 Write commands are also supported and are passed through to the lower-level
-PROROK CLI helpers:
-
-    /prorok add-event --event-id example_2026 --title "..." --question "..."
-    /prorok assess example_2026 --probability 35 --band "25-35%" --label "Малоймовірно" --rationale "..."
-    /prorok add-evidence example_2026 --url "https://..." --direction indicator --summary "..."
+PROROK CLI helpers.
 
 The goal is to keep OpenClaw skill execution deterministic and avoid the model
 choosing the wrong helper script for PROROK subcommands.
@@ -187,7 +183,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand in {"refresh", "dry-run", "refresh-dry-run"}:
         if not require_args(rest, "Missing event_id. Usage: /prorok refresh <event_id>"):
             return 2
-        refresh_script = code_dir / "prorok_refresh_dry_run_cron.py"
+        quiet_refresh = code_dir / "prorok_refresh_dry_run_quiet.py"
+        refresh_script = quiet_refresh if quiet_refresh.exists() else code_dir / "prorok_refresh_dry_run_cron.py"
         if not refresh_script.exists():
             print(f"PROROK refresh launcher is not available: {refresh_script}", file=sys.stderr)
             return 2
