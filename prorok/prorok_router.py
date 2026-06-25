@@ -9,6 +9,7 @@ This script accepts the user-facing PROROK command form, for example:
     /prorok evidence ru_capture_ukraine_oblast_center_2026
     /prorok sources
     /prorok health
+    /prorok refresh Nuclear_threat
 
 Write commands are also supported and are passed through to the lower-level
 PROROK CLI helpers:
@@ -88,6 +89,18 @@ def run_python(script: Path, args: Sequence[str], home: str) -> int:
     return proc.returncode
 
 
+def run_plain_python(script: Path, args: Sequence[str]) -> int:
+    cmd = [sys.executable, str(script), *args]
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    if proc.stdout:
+        print(proc.stdout.rstrip())
+    if proc.stderr:
+        print(proc.stderr.rstrip(), file=sys.stderr)
+
+    return proc.returncode
+
+
 def usage() -> str:
     return """PROROK commands:
   Read/state:
@@ -98,6 +111,9 @@ def usage() -> str:
     /prorok evidence <event_id>
     /prorok sources
     /prorok health
+
+  Refresh dry-run:
+    /prorok refresh <event_id> [--to <telegram_chat_id>] [--thread-id <topic_id>] [--at 2m] [--no-schedule]
 
   Write/update:
     /prorok add-event --event-id <id> --title "<title>" --question "<question>" [--forecast-horizon YYYY-MM-DD] [--criteria "..."] [--tags "a,b,c"]
@@ -167,6 +183,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if subcommand in {"sources", "source", "source-registry", "registry"}:
         return run_python(code_dir / "prorok_evidence_cli.py", ["sources", "--show-canonical"], args.home)
+
+    if subcommand in {"refresh", "dry-run", "refresh-dry-run"}:
+        if not require_args(rest, "Missing event_id. Usage: /prorok refresh <event_id>"):
+            return 2
+        refresh_script = code_dir / "prorok_refresh_dry_run_cron.py"
+        if not refresh_script.exists():
+            print(f"PROROK refresh launcher is not available: {refresh_script}", file=sys.stderr)
+            return 2
+        return run_plain_python(refresh_script, rest)
 
     if subcommand in {"add-event", "create-event", "event-add"}:
         if not rest:
