@@ -88,7 +88,13 @@ def load_event(conn: sqlite3.Connection, event_id: str) -> EventState:
 def load_latest_assessment(conn: sqlite3.Connection, event_id: str) -> AssessmentState:
     row = conn.execute(
         """
-        SELECT probability, band, label, confidence, assessed_at, rationale
+        SELECT
+            probability_percent AS probability,
+            probability_band AS band,
+            probability_label AS label,
+            confidence,
+            assessed_at,
+            rationale
         FROM assessments
         WHERE event_id = ?
         ORDER BY assessed_at DESC, assessment_id DESC
