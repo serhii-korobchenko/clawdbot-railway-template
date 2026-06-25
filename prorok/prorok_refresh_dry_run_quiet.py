@@ -6,9 +6,9 @@ cron payload and therefore the full refresh prompt. This wrapper monkey-patches 
 subprocess call so the Telegram command returns a compact confirmation instead of a
 very large JSON object.
 
-It also appends a small prompt guard used by the Telegram command path: when the
-refresh result is NO_NEW_EVIDENCE_FOUND, the final rationale must not introduce new
-factual claims that are not listed as candidate evidence.
+It also appends a strict prompt guard used by the Telegram command path: when the
+refresh result is NO_NEW_EVIDENCE_FOUND, the final report must not introduce new
+factual claims in reason or rationale that are not listed as candidate evidence.
 """
 
 from __future__ import annotations
@@ -25,9 +25,13 @@ SUMMARY: dict[str, str] = {}
 REAL_RUN = subprocess.run
 REAL_BUILD_PROMPT = launcher.build_prompt
 
-NO_NEW_EVIDENCE_GUARD = """9. No-new-evidence rationale rule:
-   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, rationale не має вводити нові фактичні твердження, яких немає в candidate evidence;
-   - у такому випадку rationale має пояснювати лише відсутність нових якісних джерел і причину no_update.
+NO_NEW_EVIDENCE_GUARD = """9. Strict no-new-evidence report rule:
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, увесь блок reason і rationale має бути процедурним, а не фактологічним;
+   - reason/rationale не мають вводити жодних нових фактів, назв нових подій, країн, локацій, заяв, навчань, переміщень, модернізацій, організацій або джерел, які не оформлені як candidate evidence;
+   - не описуй, що саме було знайдено у свіжому пошуку, якщо це не включено в candidate evidence;
+   - дозволені лише формулювання на кшталт: "нових якісних, релевантних і не дубльованих джерел не знайдено", "підстав для зміни оцінки немає", "recommended_probability: n/a", "change_from_baseline: no_update";
+   - якщо хочеш згадати будь-який конкретний новий факт або тему, спершу внеси її в CANDIDATE_EVIDENCE; інакше не згадуй її взагалі;
+   - для NO_NEW_EVIDENCE_FOUND rationale має пояснювати тільки причину no_update, без нового геополітичного або військового змісту.
 """
 
 
