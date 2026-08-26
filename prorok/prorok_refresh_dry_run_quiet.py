@@ -25,7 +25,16 @@ SUMMARY: dict[str, str] = {}
 REAL_RUN = subprocess.run
 REAL_BUILD_PROMPT = launcher.build_prompt
 
-NO_NEW_EVIDENCE_GUARD = """9. Strict no-new-evidence report rule:
+NO_EVIDENCE_REASON = (
+    "Нових якісних, релевантних і не дубльованих джерел після останньої оцінки не знайдено. "
+    "Підстав для зміни оцінки немає."
+)
+NO_EVIDENCE_RATIONALE = (
+    "Оскільки candidate evidence відсутні, recommended_probability залишається n/a, "
+    "change_from_baseline: no_update. SQLite DB не змінюється до ручного підтвердження користувача."
+)
+
+NO_NEW_EVIDENCE_GUARD = f"""9. Strict no-new-evidence report rule:
    - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, увесь блок reason і rationale має бути процедурним, а не фактологічним;
    - reason/rationale не мають вводити жодних нових фактів, назв нових подій, країн, локацій, заяв, навчань, переміщень, модернізацій, організацій або джерел, які не оформлені як candidate evidence;
    - не описуй, що саме було знайдено у свіжому пошуку, якщо це не включено в candidate evidence;
@@ -36,16 +45,58 @@ NO_NEW_EVIDENCE_GUARD = """9. Strict no-new-evidence report rule:
 10. Mandatory NO_NEW_EVIDENCE_FOUND template override:
    - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, використовуй такі значення ДОСЛІВНО;
    - не розширюй, не перефразовуй і не додавай жодного речення до цих двох полів;
-   - це правило має пріоритет над будь-якою іншою інструкцією щодо стилю, деталізації або пояснення.
+   - це правило має пріоритет над будь-якою іншою інструкцією щодо стилю, деталізації або пояснення;
+   - фінальна відповідь вважається невалідною, якщо reason або rationale відрізняються від шаблону хоча б одним додатковим реченням.
 
-   reason: Нових якісних, релевантних і не дубльованих джерел після останньої оцінки не знайдено. Підстав для зміни оцінки немає.
+   reason: {NO_EVIDENCE_REASON}
 
-   rationale: Оскільки candidate evidence відсутні, recommended_probability залишається n/a, change_from_baseline: no_update. SQLite DB не змінюється до ручного підтвердження користувача.
+   rationale: {NO_EVIDENCE_RATIONALE}
+
+11. Final self-check before sending:
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, перед відповіддю перевір, що рядок reason повністю збігається з Mandatory template;
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, перед відповіддю перевір, що рядок rationale повністю збігається з Mandatory template;
+   - якщо є відхилення, виправ reason/rationale на шаблон і тільки після цього відправляй фінальну відповідь.
 """
+
+
+def harden_no_evidence_format(prompt: str) -> str:
+    """Make the final report format itself repeat the no-evidence template.
+
+    The base launcher already has generic placeholders in the final format. Some
+    model runs follow those placeholders more strongly than the added guard, so this
+    wrapper rewrites those placeholders into explicit conditional template lines.
+    """
+    reason_placeholder = "reason: <1-3 речення, якщо нових якісних джерел немає>"
+    reason_hardened = (
+        "reason: якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, використай дослівно: "
+        f"{NO_EVIDENCE_REASON}"
+    )
+
+    rationale_placeholder = "rationale: 4-7 речень"
+    rationale_hardened = (
+        "rationale: якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, використай дослівно: "
+        f"{NO_EVIDENCE_RATIONALE}; якщо є candidate evidence, тоді дай 4-7 речень аналізу"
+    )
+
+    prompt = prompt.replace(reason_placeholder, reason_hardened)
+    prompt = prompt.replace(rationale_placeholder, rationale_hardened)
+
+    # Add an extra validation note immediately before DB_ACTION in the final format.
+    validation_note = (
+        "\nNO_NEW_EVIDENCE_VALIDATION:\n"
+        f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, reason MUST_EQUAL: {NO_EVIDENCE_REASON}\n"
+        f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, rationale MUST_EQUAL: {NO_EVIDENCE_RATIONALE}\n"
+        "не додавай цей validation block у фінальну відповідь; використай його тільки як self-check.\n"
+    )
+    marker = "\nDB_ACTION:\n"
+    if "NO_NEW_EVIDENCE_VALIDATION:" not in prompt and marker in prompt:
+        prompt = prompt.replace(marker, validation_note + marker, 1)
+    return prompt
 
 
 def guarded_build_prompt(*args: Any, **kwargs: Any) -> str:
     prompt = REAL_BUILD_PROMPT(*args, **kwargs)
+    prompt = harden_no_evidence_format(prompt)
     marker = "\nФормат фінальної відповіді:"
     if NO_NEW_EVIDENCE_GUARD in prompt:
         return prompt
