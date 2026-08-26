@@ -33,6 +33,32 @@ NO_EVIDENCE_RATIONALE = (
     "Оскільки candidate evidence відсутні, recommended_probability залишається n/a, "
     "change_from_baseline: no_update. SQLite DB не змінюється до ручного підтвердження користувача."
 )
+NO_EVIDENCE_NEXT_STEP = "очікує підтвердження користувача перед додаванням evidence/assessment"
+
+
+def no_evidence_report_skeleton() -> str:
+    """Return the mandatory final structure for a no-new-evidence report."""
+    return f"""PROROK_REFRESH_DRY_RUN
+event_id: <залиш event_id з події без змін>
+baseline_probability: <залиш baseline_probability з поточної оцінки без змін>
+search_window: <коротко>
+
+CANDIDATE_EVIDENCE:
+NO_NEW_EVIDENCE_FOUND
+reason: {NO_EVIDENCE_REASON}
+
+ASSESSMENT_RECOMMENDATION:
+recommended_probability: n/a
+recommended_band: n/a
+recommended_label: n/a
+confidence: medium
+change_from_baseline: no_update
+rationale: {NO_EVIDENCE_RATIONALE}
+
+DB_ACTION:
+do_not_write: true
+next_step: {NO_EVIDENCE_NEXT_STEP}"""
+
 
 NO_NEW_EVIDENCE_GUARD = f"""9. Strict no-new-evidence report rule:
    - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, увесь блок reason і rationale має бути процедурним, а не фактологічним;
@@ -52,11 +78,40 @@ NO_NEW_EVIDENCE_GUARD = f"""9. Strict no-new-evidence report rule:
 
    rationale: {NO_EVIDENCE_RATIONALE}
 
-11. Final self-check before sending:
+11. Mandatory full NO_NEW_EVIDENCE_FOUND report skeleton:
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, фінальна відповідь ОБОВʼЯЗКОВО має містити всі блоки нижче;
+   - не скорочуй, не стискай і не викидай ASSESSMENT_RECOMMENDATION або DB_ACTION;
+   - не став rationale у CANDIDATE_EVIDENCE; rationale має бути тільки в ASSESSMENT_RECOMMENDATION;
+   - не додавай NO_NEW_EVIDENCE_VALIDATION у фінальну відповідь;
+   - event_id і baseline_probability підстав з цієї події, але всю решту no-evidence skeleton збережи без структурних змін.
+
+{no_evidence_report_skeleton()}
+
+12. Final self-check before sending:
    - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, перед відповіддю перевір, що рядок reason повністю збігається з Mandatory template;
    - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, перед відповіддю перевір, що рядок rationale повністю збігається з Mandatory template;
-   - якщо є відхилення, виправ reason/rationale на шаблон і тільки після цього відправляй фінальну відповідь.
+   - якщо CANDIDATE_EVIDENCE дорівнює NO_NEW_EVIDENCE_FOUND, перед відповіддю перевір, що відповідь містить окремі блоки ASSESSMENT_RECOMMENDATION і DB_ACTION;
+   - якщо є відхилення, виправ відповідь на повний no-evidence skeleton і тільки після цього відправляй фінальну відповідь.
 """
+
+
+def no_evidence_branch_template() -> str:
+    """Return the no-evidence branch to inject into the final answer format."""
+    return f"""CANDIDATE_EVIDENCE:
+NO_NEW_EVIDENCE_FOUND
+reason: якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, використай дослівно: {NO_EVIDENCE_REASON}
+
+ASSESSMENT_RECOMMENDATION:
+recommended_probability: n/a
+recommended_band: n/a
+recommended_label: n/a
+confidence: medium
+change_from_baseline: no_update
+rationale: якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, використай дослівно: {NO_EVIDENCE_RATIONALE}
+
+DB_ACTION:
+do_not_write: true
+next_step: {NO_EVIDENCE_NEXT_STEP}"""
 
 
 def harden_no_evidence_format(prompt: str) -> str:
@@ -64,8 +119,18 @@ def harden_no_evidence_format(prompt: str) -> str:
 
     The base launcher already has generic placeholders in the final format. Some
     model runs follow those placeholders more strongly than the added guard, so this
-    wrapper rewrites those placeholders into explicit conditional template lines.
+    wrapper rewrites those placeholders into explicit conditional template lines and
+    expands the no-evidence branch into a full report skeleton.
     """
+    no_evidence_original = (
+        "CANDIDATE_EVIDENCE:\n"
+        "NO_NEW_EVIDENCE_FOUND\n"
+        "reason: <1-3 речення, якщо нових якісних джерел немає>\n\n"
+        "АБО, якщо є справді якісні нові джерела:"
+    )
+    no_evidence_hardened = no_evidence_branch_template() + "\n\nАБО, якщо є справді якісні нові джерела:"
+    prompt = prompt.replace(no_evidence_original, no_evidence_hardened)
+
     reason_placeholder = "reason: <1-3 речення, якщо нових якісних джерел немає>"
     reason_hardened = (
         "reason: якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, використай дослівно: "
@@ -81,11 +146,12 @@ def harden_no_evidence_format(prompt: str) -> str:
     prompt = prompt.replace(reason_placeholder, reason_hardened)
     prompt = prompt.replace(rationale_placeholder, rationale_hardened)
 
-    # Add an extra validation note immediately before DB_ACTION in the final format.
+    # Add an extra validation note immediately before the first DB_ACTION in the final format.
     validation_note = (
         "\nNO_NEW_EVIDENCE_VALIDATION:\n"
         f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, reason MUST_EQUAL: {NO_EVIDENCE_REASON}\n"
         f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, rationale MUST_EQUAL: {NO_EVIDENCE_RATIONALE}\n"
+        "якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, response MUST_INCLUDE окремі блоки ASSESSMENT_RECOMMENDATION і DB_ACTION.\n"
         "не додавай цей validation block у фінальну відповідь; використай його тільки як self-check.\n"
     )
     marker = "\nDB_ACTION:\n"
