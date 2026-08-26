@@ -62,7 +62,7 @@ def run_plain_python(script: Path, args: Sequence[str]) -> int:
 
 def usage() -> str:
     return """PROROK commands:
-  /prorok list
+  /prorok list [--status active|paused|resolved|archived|all] [--limit 50]
   /prorok show <event_id>
   /prorok trend <event_id>
   /prorok latest <event_id>
@@ -81,6 +81,17 @@ def require_args(rest: Sequence[str], message: str) -> bool:
         return True
     print(message, file=sys.stderr)
     return False
+
+
+def list_args(rest: Sequence[str]) -> list[str]:
+    """Build arguments for prorok_event_cli list-events.
+
+    With no extra args, prorok_event_cli defaults to --status active. Explicit
+    filters such as `--status all` or `--limit 10` are passed through.
+    """
+    if len(rest) == 1 and rest[0] in {"active", "paused", "resolved", "archived", "all"}:
+        return ["list-events", "--status", rest[0]]
+    return ["list-events", *rest]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -104,7 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand in {"health", "status"}:
         return run_python(code_dir / "prorok_cli.py", ["health"], args.home)
     if subcommand in {"list", "events"}:
-        return run_python(code_dir / "prorok_event_cli.py", ["list-events", "--status", "all"], args.home)
+        return run_python(code_dir / "prorok_event_cli.py", list_args(rest), args.home)
     if subcommand == "show":
         if not require_args(rest, "Missing event_id. Usage: /prorok show <event_id>"):
             return 2
