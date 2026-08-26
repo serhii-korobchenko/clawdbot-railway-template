@@ -9,6 +9,8 @@ very large JSON object.
 It also appends a strict prompt guard used by the Telegram command path: when the
 refresh result is NO_NEW_EVIDENCE_FOUND, the final report must not introduce new
 factual claims in reason or rationale that are not listed as candidate evidence.
+
+Railway deploy trigger: 2026-08-26T15:57Z.
 """
 
 from __future__ import annotations
