@@ -26,7 +26,15 @@ WORKDIR /openclaw
 ARG OPENCLAW_GIT_REF=v2026.5.22
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
-RUN pnpm config set minimumReleaseAge 0
+# Disable pnpm minimum release age gate for OpenClaw source build.
+# OpenClaw's workspace config can override global pnpm config, so patch both the
+# project config and pnpm-workspace.yaml before running pnpm install.
+RUN set -eux; \
+  pnpm config set minimumReleaseAge 0 --location project || true; \
+  if [ -f pnpm-workspace.yaml ]; then \
+    sed -i -E 's/^([[:space:]]*minimumReleaseAge:).*/\1 0/' pnpm-workspace.yaml; \
+    grep -n "minimumReleaseAge" pnpm-workspace.yaml || true; \
+  fi
 
 # Patch: relax version requirements for packages that may reference unpublished versions.
 RUN set -eux; \
@@ -34,9 +42,6 @@ RUN set -eux; \
     sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*">=[^"]+"/"openclaw": "*"/g' "$f"; \
     sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*"workspace:[^"]+"/"openclaw": "*"/g' "$f"; \
   done
-
-# Disable pnpm minimum release age gate for OpenClaw source build
-
 
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm build
