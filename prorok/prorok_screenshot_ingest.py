@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Create or update a PROROK event from a forecast-question screenshot.
 
-This helper is intentionally deterministic around the database layer: the only
-model-dependent step is image-to-JSON extraction. Event and assessment writes are
-performed through the existing PROROK CLI helpers.
+This helper is deterministic around the database layer: the only model-dependent
+step is image-to-JSON extraction. The event_id used for writes is stabilized by
+matching existing non-archived events with the same normalized question/horizon
+or by generating a canonical hash from the normalized question/horizon. The
+model-proposed event_id is stored only for audit/source notes.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -17,6 +20,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -48,7 +52,7 @@ Return ONLY valid JSON with this shape:
 Rules:
 - The screenshot may be in Ukrainian, English, or mixed text.
 - Preserve the forecast question meaning exactly.
-- event_id must be ASCII snake_case and should include the year when possible.
+- event_id should be ASCII snake_case and include the year when possible, but the database script will replace it with a deterministic canonical ID.
 - forecast_horizon must be the final resolution date, not the submission deadline.
 - probability_percent must be an integer 0-100 only if an actual current probability is visible. If not visible, set it to null.
 - If probability_percent is null, set confidence to low.
@@ -198,18 +202,101 @@ def normalize_tags(value: Any) -> str:
     return ",".join(dict.fromkeys(items))
 
 
+def normalize_fingerprint_text(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = text.replace("ё", "е")
+    text = text.replace("’", "'").replace("ʼ", "'").replace("`", "'")
+    text = re.sub(r"[^0-9a-zа-щьюяґєії'\s]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def event_fingerprint(data: dict[str, Any]) -> str:
+    question = normalize_fingerprint_text(data.get("question"))
+    horizon = normalize_fingerprint_text(data.get("forecast_horizon"))
+    return f"{question}|{horizon}"
+
+
+def extract_year(data: dict[str, Any]) -> str:
+    horizon = str(data.get("forecast_horizon") or "")
+    match = re.search(r"(20\d{2}|19\d{2})", horizon)
+    if match:
+        return match.group(1)
+    text = f"{data.get('title') or ''} {data.get('question') or ''}"
+    match = re.search(r"(20\d{2}|19\d{2})", text)
+    return match.group(1) if match else "event"
+
+
+def canonical_event_id(data: dict[str, Any]) -> str:
+    digest = hashlib.sha256(event_fingerprint(data).encode("utf-8")).hexdigest()[:12]
+    year = extract_year(data)
+    if year == "event":
+        return f"forecast_{digest}"
+    return f"forecast_{year}_{digest}"
+
+
+def find_existing_event_by_fingerprint(db_path: Path, data: dict[str, Any]) -> str | None:
+    if not db_path.exists():
+        return None
+    target = event_fingerprint(data)
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT event_id, question, forecast_horizon, status, created_at
+            FROM events
+            WHERE status != 'archived'
+            ORDER BY
+              CASE status
+                WHEN 'active' THEN 0
+                WHEN 'paused' THEN 1
+                WHEN 'resolved' THEN 2
+                ELSE 3
+              END,
+              created_at ASC,
+              event_id ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        candidate = {
+            "question": row["question"],
+            "forecast_horizon": row["forecast_horizon"],
+        }
+        if event_fingerprint(candidate) == target:
+            return str(row["event_id"])
+    return None
+
+
+def stabilize_event_id(db_path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    model_event_id = str(data.get("event_id") or "").strip() or None
+    existing = find_existing_event_by_fingerprint(db_path, data)
+    if existing:
+        data["model_event_id"] = model_event_id
+        data["event_id"] = existing
+        data["event_id_source"] = "existing_fingerprint_match"
+        return data
+
+    data["model_event_id"] = model_event_id
+    data["event_id"] = canonical_event_id(data)
+    data["event_id_source"] = "canonical_question_hash"
+    return data
+
+
 def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("is_forecast_event") is False:
         raise IngestError(f"image is not a forecast event: {payload.get('notes') or 'no details'}")
 
-    required = ["event_id", "title", "question", "forecast_horizon"]
+    required = ["title", "question", "forecast_horizon"]
     missing = [key for key in required if not str(payload.get(key) or "").strip()]
     if missing:
         raise IngestError(f"missing required fields: {', '.join(missing)}")
 
-    event_id = str(payload["event_id"]).strip()
-    if not slug_ok(event_id):
-        raise IngestError(f"invalid event_id, expected ASCII snake_case: {event_id}")
+    model_event_id = str(payload.get("event_id") or "").strip() or None
+    if model_event_id and not slug_ok(model_event_id):
+        model_event_id = None
 
     probability = payload.get("probability_percent")
     if probability is not None:
@@ -227,7 +314,9 @@ def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         confidence = "low"
 
     return {
-        "event_id": event_id,
+        "event_id": model_event_id or "pending_canonical_event_id",
+        "model_event_id": model_event_id,
+        "event_id_source": "model_pending_canonicalization",
         "title": str(payload["title"]).strip(),
         "question": str(payload["question"]).strip(),
         "forecast_horizon": str(payload["forecast_horizon"]).strip(),
@@ -330,7 +419,7 @@ def apply_event(
             "--tags",
             data["tags"],
             "--source-image-note",
-            f"Created from Telegram screenshot: {image_path.name}",
+            f"Created from Telegram screenshot: {image_path.name}; event_id_source={data.get('event_id_source')}; model_event_id={data.get('model_event_id') or 'n/a'}",
         ]
     )
 
@@ -368,6 +457,8 @@ def apply_event(
 
     return {
         "event_id": data["event_id"],
+        "model_event_id": data.get("model_event_id"),
+        "event_id_source": data.get("event_id_source"),
         "created_new": not existed_before,
         "status": status,
         "probability_percent": probability,
@@ -416,7 +507,9 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     try:
         raw = call_openai_vision(image_path, args.model)
+        record["raw_extracted"] = raw
         data = validate_payload(raw)
+        data = stabilize_event_id(db_path, data)
         record["extracted"] = data
 
         if args.dry_run:
@@ -441,6 +534,8 @@ def main(argv: Iterable[str] | None = None) -> int:
             print("PROROK_SCREENSHOT_INGEST")
             print("status: ok")
             print(f"event_id: {data['event_id']}")
+            print(f"model_event_id: {data.get('model_event_id') or 'n/a'}")
+            print(f"event_id_source: {data.get('event_id_source')}")
             print(f"title: {data['title']}")
             print(f"event_status: {result.get('status', 'dry_run')}")
             print(f"probability: {data['probability_percent'] if data['probability_percent'] is not None else 'n/a'}")
