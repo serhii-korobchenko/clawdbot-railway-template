@@ -9,20 +9,27 @@ starting too many OpenClaw cron jobs at the same time.
 It does not write to the PROROK SQLite database. Each scheduled job remains a
 review-first dry-run and is expected to delete itself after execution through the
 single-event launcher.
+
+For operational auditability, each target scheduling attempt is appended to a
+persistent JSONL log under /data/workspace/prorok by default. This audit log tracks
+which one-shot refresh jobs were created, without changing the PROROK SQLite DB.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 DEFAULT_DB_PATH = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_PROMPT_DIR = Path("/data/workspace/prorok/refresh_prompts")
+DEFAULT_AUDIT_LOG = Path("/data/workspace/prorok/refresh_runs.jsonl")
 DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 DEFAULT_START_AT = "2m"
@@ -39,6 +46,10 @@ class RefreshTarget:
     status: str
     forecast_horizon: str
     updated_at: str
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def resolve_refresh_script() -> Path:
@@ -150,12 +161,34 @@ def run_one(script: Path, target: RefreshTarget, args: argparse.Namespace, at_va
     return subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
+def parse_launcher_output(stdout: str) -> dict[str, str]:
+    """Extract stable key/value fields printed by the single-event launcher."""
+    fields: dict[str, str] = {}
+    for raw_line in (stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key in {"prompt_file", "schedule", "cron_id", "run_at"}:
+            fields[key] = value
+    return fields
+
+
+def append_audit_record(audit_log: Path, record: dict[str, object]) -> None:
+    audit_log.parent.mkdir(parents=True, exist_ok=True)
+    with audit_log.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Schedule no-write PROROK refresh dry-runs for active events."
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="Path to PROROK SQLite database")
     parser.add_argument("--prompt-dir", type=Path, default=DEFAULT_PROMPT_DIR, help="Directory for generated prompt files")
+    parser.add_argument("--audit-log", type=Path, default=DEFAULT_AUDIT_LOG, help="JSONL audit log for scheduled refresh attempts")
     parser.add_argument("--status", default="active", choices=["active", "paused", "resolved", "archived", "all"])
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Maximum number of events to refresh")
     parser.add_argument("--start-at", default=DEFAULT_START_AT, help="First one-shot offset, for example 2m")
@@ -190,6 +223,7 @@ def main(argv: list[str]) -> int:
     print(f"limit: {args.limit}")
     print(f"start_at: {minute_offset(start_minutes)}")
     print(f"spacing_minutes: {args.spacing_minutes}")
+    print(f"audit_log: {args.audit_log}")
     print(f"schedule: {'skipped (--no-schedule)' if args.no_schedule else 'creating'}")
 
     if not targets:
@@ -207,19 +241,55 @@ def main(argv: list[str]) -> int:
         print(f"   at: {at_value}")
 
         proc = run_one(script, target, args, at_value)
+        parsed = parse_launcher_output(proc.stdout or "")
+        target_failed = bool(proc.stderr) or proc.returncode != 0
+
         if proc.stdout:
             for line in proc.stdout.rstrip().splitlines():
                 print(f"   {line}")
         if proc.stderr:
-            failures += 1
             print("   stderr:", file=sys.stderr)
             for line in proc.stderr.rstrip().splitlines():
                 print(f"   {line}", file=sys.stderr)
         if proc.returncode != 0:
-            failures += 1
             print(f"   result: failed rc={proc.returncode}")
         else:
             print("   result: ok")
+
+        audit_record: dict[str, object] = {
+            "timestamp_utc": utc_now_iso(),
+            "launcher": "prorok_refresh_all_dry_run_quiet.py",
+            "action": "schedule_refresh_dry_run",
+            "event_id": target.event_id,
+            "title": target.title,
+            "status": target.status,
+            "forecast_horizon": target.forecast_horizon,
+            "updated_at": target.updated_at,
+            "index": idx,
+            "target_count": len(targets),
+            "at_offset": at_value,
+            "prompt_file": parsed.get("prompt_file", ""),
+            "schedule_output": parsed.get("schedule", ""),
+            "cron_id": parsed.get("cron_id", ""),
+            "run_at": parsed.get("run_at", ""),
+            "no_schedule": bool(args.no_schedule),
+            "scheduled": bool(parsed.get("cron_id")) and not args.no_schedule and not target_failed,
+            "returncode": proc.returncode,
+            "result": "failed" if target_failed else "ok",
+            "stderr_tail": (proc.stderr or "")[-2000:],
+            "to": args.to,
+            "thread_id": str(args.thread_id),
+            "agent": args.agent,
+        }
+        try:
+            append_audit_record(args.audit_log, audit_record)
+            print(f"   audit_log: appended {args.audit_log}")
+        except OSError as exc:
+            failures += 1
+            print(f"   audit_log_error: {exc}", file=sys.stderr)
+
+        if target_failed:
+            failures += 1
 
     print("")
     print(f"completed: {len(targets) - failures}/{len(targets)}")
