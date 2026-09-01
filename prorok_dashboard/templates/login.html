@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Вхід · PROROK{% endblock %}
+{% block content %}
+<section class="login-panel" aria-labelledby="login-title">
+  <p class="eyebrow">PROROK</p>
+  <h1 id="login-title">Вхід до dashboard</h1>
+  <p class="muted">Введіть пароль доступу.</p>
+  {% if error %}
+  <div class="alert alert-error" role="alert">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/login" class="login-form">
+    <label for="password">Пароль</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <button class="primary-button" type="submit">Увійти</button>
+  </form>
+</section>
+{% endblock %}

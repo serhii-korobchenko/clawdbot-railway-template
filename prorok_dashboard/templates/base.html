@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PROROK{% endblock %}</title>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='css/app.css') }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <script defer src="{{ request.url_for('static', path='js/dashboard.js') }}"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="/">PROROK</a>
+      <span class="brand-subtitle">Forecasting Dashboard</span>
+      {% if request.session.get('prorok_authenticated') %}
+      <form method="post" action="/logout" class="logout-form">
+        <button class="link-button" type="submit">Вийти</button>
+      </form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="shell main-content">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

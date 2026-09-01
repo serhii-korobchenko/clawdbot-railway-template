@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Події · PROROK{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Forecasting Dashboard</p>
+    <h1>Прогнозні події</h1>
+  </div>
+  <div class="total-count">{{ data.total }} подій</div>
+</section>
+
+<nav class="status-tabs" aria-label="Фільтр статусу">
+  {% set tabs = [
+    (None, 'Усі', data.total),
+    ('active', 'Active', data.status_counts.active),
+    ('paused', 'Paused', data.status_counts.paused),
+    ('resolved', 'Resolved', data.status_counts.resolved),
+    ('archived', 'Archived', data.status_counts.archived)
+  ] %}
+  {% for value, label, count in tabs %}
+  {% set href = '/?' + (('status=' + value) if value else '') %}
+  <a
+    class="status-tab {% if status_filter == value %}is-active{% endif %}"
+    href="{{ href }}"
+    hx-get="/partials/events{% if value %}?status={{ value }}{% endif %}"
+    hx-target="#events-list"
+    hx-push-url="{{ href }}"
+  >{{ label }} <span>{{ count }}</span></a>
+  {% endfor %}
+</nav>
+
+<form method="get" action="/" class="search-form">
+  {% if status_filter %}
+  <input id="status-field" type="hidden" name="status" value="{{ status_filter }}">
+  {% else %}
+  <input id="status-field" type="hidden" name="status" value="">
+  {% endif %}
+  <label for="event-search">Пошук</label>
+  <input
+    id="event-search"
+    name="q"
+    type="search"
+    value="{{ q }}"
+    placeholder="Назва, питання, event_id або тег"
+    hx-get="/partials/events"
+    hx-trigger="keyup changed delay:350ms, search"
+    hx-target="#events-list"
+    hx-include="#status-field"
+  >
+  <button type="submit">Знайти</button>
+</form>
+
+<div id="events-list">
+  {% include "partials/events_list.html" %}
+</div>
+{% endblock %}

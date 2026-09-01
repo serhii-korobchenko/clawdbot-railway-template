@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}{{ data.event.title }} · PROROK{% endblock %}
+{% block content %}
+<a class="back-link" href="/">← Усі події</a>
+
+<article class="event-detail">
+  <header class="event-detail-header">
+    <div class="card-topline">
+      <span class="status-badge status-{{ data.event.status }}">{{ data.event.status|upper }}</span>
+      <span class="horizon">Горизонт: {{ data.event.forecast_horizon|fmt_date }}</span>
+    </div>
+    <h1>{{ data.event.title }}</h1>
+    <p class="forecast-question">{{ data.event.question }}</p>
+  </header>
+
+  <section class="forecast-grid">
+    <div class="panel current-panel">
+      <p class="eyebrow">Поточний прогноз</p>
+      {% if data.current_assessment %}
+      <div class="current-probability">{{ data.current_assessment.probability_percent }}%</div>
+      <p class="confidence">{{ data.current_assessment.confidence|capitalize }} confidence</p>
+      {% if data.current_assessment.delta_from_previous is not none %}
+      <p class="delta">
+        {{ data.current_assessment.delta_from_previous|delta_symbol }}
+        {{ data.current_assessment.delta_from_previous|delta_text }}
+      </p>
+      {% endif %}
+      <dl class="compact-meta">
+        <div><dt>Діапазон</dt><dd>{{ data.current_assessment.probability_band }}</dd></div>
+        <div><dt>Мітка</dt><dd>{{ data.current_assessment.probability_label }}</dd></div>
+        <div><dt>Оцінено</dt><dd>{{ data.current_assessment.assessed_at|fmt_datetime }}</dd></div>
+      </dl>
+      {% else %}
+      <div class="current-probability">—</div>
+      <p class="muted">Оцінки ще немає</p>
+      {% endif %}
+    </div>
+
+    <div class="panel chart-panel">
+      <p class="eyebrow">Історія ймовірності</p>
+      {% if data.assessments %}
+      <div id="chart-data" data-points='{{ chart_data|tojson|forceescape }}'></div>
+      <canvas id="probability-chart" aria-label="Графік історії ймовірності"></canvas>
+      {% else %}
+      <p class="empty-copy">Немає історії оцінок.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="section-block" aria-labelledby="assessment-history-title">
+    <h2 id="assessment-history-title">Історія оцінок</h2>
+    {% if history %}
+    <div class="timeline">
+      {% for assessment in history %}
+        {% include "partials/assessment_item.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-copy">Немає історії оцінок.</p>
+    {% endif %}
+  </section>
+
+  <section class="section-block" aria-labelledby="evidence-title">
+    <div class="section-heading-row">
+      <h2 id="evidence-title">Evidence timeline</h2>
+      <span class="count-pill">{{ data.evidence|length }}</span>
+    </div>
+    <div class="info-note">
+      Evidence зберігається на рівні події. Поточна модель даних не дозволяє
+      достовірно прив’язати окремий evidence до конкретної оцінки.
+    </div>
+    {% if data.evidence %}
+    <div class="timeline">
+      {% for evidence in data.evidence %}
+        {% include "partials/evidence_item.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-copy">Для цієї події evidence ще не зафіксовано.</p>
+    {% endif %}
+  </section>
+
+  <section class="section-block" aria-labelledby="criteria-title">
+    <h2 id="criteria-title">Критерії резолюції</h2>
+    {% if criteria_sections %}
+    <div class="criteria-grid">
+      {% for section in criteria_sections %}
+      <div class="criteria-item">
+        <h3>{{ section.label }}</h3>
+        {% if section.kind == 'list' %}
+        <ul>
+          {% for item in section.value %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+        {% elif section.kind == 'mapping' %}
+        <dl class="mapping-list">
+          {% for key, value in section.value.items() %}
+          <div><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+          {% endfor %}
+        </dl>
+        {% else %}
+        <p>{{ section.value }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-copy">Критерії резолюції не задані.</p>
+    {% endif %}
+  </section>
+
+  {% if data.event.tags %}
+  <section class="tags-row" aria-label="Теги">
+    {% for tag in data.event.tags %}
+    <span class="tag">{{ tag }}</span>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <details class="technical-details">
+    <summary>Технічні дані</summary>
+    <dl class="mapping-list">
+      <div><dt>event_id</dt><dd><code>{{ data.event.event_id }}</code></dd></div>
+      <div><dt>created_at</dt><dd>{{ data.event.created_at }}</dd></div>
+      <div><dt>updated_at</dt><dd>{{ data.event.updated_at }}</dd></div>
+      {% if data.event.archived_at %}
+      <div><dt>archived_at</dt><dd>{{ data.event.archived_at }}</dd></div>
+      {% elif data.event.status == 'archived' %}
+      <div><dt>archived_at</dt><dd>Дата архівації недоступна</dd></div>
+      {% endif %}
+      {% if data.event.provenance.source_image_note %}
+      <div><dt>source_image_note</dt><dd>{{ data.event.provenance.source_image_note }}</dd></div>
+      {% endif %}
+    </dl>
+  </details>
+</article>
+{% endblock %}

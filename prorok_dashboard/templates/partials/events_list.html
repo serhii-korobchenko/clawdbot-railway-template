@@ -1,0 +1,12 @@
+{% if data['items'] %}
+<section class="event-grid" aria-label="Події">
+  {% for event in data['items'] %}
+    {% include "partials/event_card.html" %}
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state">
+  <h2>За цими параметрами подій немає.</h2>
+  <p>Змініть статус або пошуковий запит.</p>
+</section>
+{% endif %}

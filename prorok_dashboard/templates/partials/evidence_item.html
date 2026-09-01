@@ -1,0 +1,52 @@
+<article class="timeline-item evidence-item evidence-{{ evidence.direction }}">
+  <div class="timeline-dot" aria-hidden="true"></div>
+  <div class="timeline-content">
+    <div class="timeline-topline">
+      <span class="evidence-direction">
+        {% if evidence.direction == 'indicator' %}↑ INDICATOR
+        {% elif evidence.direction == 'counterindicator' %}↓ COUNTERINDICATOR
+        {% else %}— NEUTRAL{% endif %}
+      </span>
+      {% if evidence.strength %}
+      <span class="strength">{{ evidence.strength|capitalize }} strength</span>
+      {% endif %}
+    </div>
+
+    <p class="evidence-summary">{{ evidence.summary }}</p>
+
+    <div class="quality-metrics">
+      {% if evidence.relevance is not none %}
+      <span>Relevance <strong>{{ evidence.relevance }}/100</strong></span>
+      {% endif %}
+      {% if evidence.credibility is not none %}
+      <span>Credibility <strong>{{ evidence.credibility }}/100</strong></span>
+      {% endif %}
+    </div>
+
+    <div class="source-box">
+      <div>
+        <strong>{{ evidence.source.title or evidence.source.domain or 'Source' }}</strong>
+        {% if evidence.source.domain %}
+        <span class="muted">{{ evidence.source.domain }}</span>
+        {% endif %}
+      </div>
+      <a href="{{ evidence.source.url|safe_external_url }}" target="_blank" rel="noopener noreferrer">Відкрити джерело ↗</a>
+    </div>
+
+    {% if evidence.source.published_at %}
+    <p class="source-date">Опубліковано: {{ evidence.source.published_at|fmt_date }}</p>
+    {% else %}
+    <p class="source-date">Evidence додано: {{ evidence.created_at|fmt_date }}</p>
+    {% endif %}
+
+    <details class="inline-details">
+      <summary>Технічні дані evidence</summary>
+      <dl class="mapping-list">
+        <div><dt>evidence_id</dt><dd>{{ evidence.evidence_id }}</dd></div>
+        {% if evidence.run_id %}<div><dt>run_id</dt><dd>{{ evidence.run_id }}</dd></div>{% endif %}
+        <div><dt>source_id</dt><dd>{{ evidence.source.source_id }}</dd></div>
+        <div><dt>canonical_url</dt><dd>{{ evidence.source.canonical_url }}</dd></div>
+      </dl>
+    </details>
+  </div>
+</article>

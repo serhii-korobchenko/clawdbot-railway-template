@@ -1,0 +1,27 @@
+<article class="timeline-item assessment-item">
+  <div class="timeline-dot" aria-hidden="true"></div>
+  <div class="timeline-content">
+    <div class="timeline-topline">
+      <time>{{ assessment.assessed_at|fmt_datetime }}</time>
+      <strong>{{ assessment.probability_percent }}%</strong>
+    </div>
+    <div class="inline-meta">
+      {% if assessment.delta_from_previous is not none %}
+      <span>{{ assessment.delta_from_previous|delta_symbol }} {{ assessment.delta_from_previous|delta_text }}</span>
+      {% endif %}
+      <span>{{ assessment.confidence|capitalize }} confidence</span>
+      <span>{{ assessment.probability_band }}</span>
+      <span>{{ assessment.probability_label }}</span>
+    </div>
+    {% if assessment.rationale %}
+    <h3>Обґрунтування</h3>
+    <p>{{ assessment.rationale }}</p>
+    {% endif %}
+    {% if assessment.run_id %}
+    <details class="inline-details">
+      <summary>run_id</summary>
+      <code>{{ assessment.run_id }}</code>
+    </details>
+    {% endif %}
+  </div>
+</article>
