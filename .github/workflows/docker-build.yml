@@ -1,4 +1,4 @@
-name: Docker build
+name: PROROK build and tests
 
 on:
   pull_request:
@@ -7,7 +7,33 @@ on:
       - main
 
 jobs:
-  docker-build:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt -r prorok_dashboard/requirements.txt
+
+      - name: Python syntax validation
+        run: python -m compileall -q prorok_api prorok_dashboard
+
+      - name: Node supervisor syntax validation
+        run: node --check src/start-with-prorok-api.js
+
+      - name: Run PROROK tests
+        run: pytest -q tests/prorok_api prorok_dashboard/tests
+
+  main-docker-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -16,13 +42,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build only (no push). If this fails, the PR breaks container builds.
-      - name: Build Docker image
+      - name: Build main Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: false
           tags: openclaw-railway-template:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  dashboard-docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build PROROK dashboard Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./prorok_dashboard/Dockerfile
+          push: false
+          tags: prorok-dashboard:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
