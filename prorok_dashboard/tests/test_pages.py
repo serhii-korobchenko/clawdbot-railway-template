@@ -17,6 +17,20 @@ def test_status_filter_and_search(logged_in_client):
     assert "Test event" in search.text
 
 
+def test_htmx_filter_state_contract(logged_in_client):
+    response = logged_in_client.get("/?status=active&q=Test")
+    assert response.status_code == 200
+    assert 'data-status="archived"' in response.text
+    assert 'hx-include="#event-search"' in response.text
+    assert 'id="status-field" type="hidden" name="status" value="active"' in response.text
+
+    script = logged_in_client.get("/static/js/dashboard.js")
+    assert script.status_code == 200
+    assert "statusField.value = status" in script.text
+    assert "window.history.pushState" in script.text
+    assert "window.history.replaceState" in script.text
+
+
 def test_detail_contains_required_sections(logged_in_client):
     response = logged_in_client.get("/events/event-1")
     assert response.status_code == 200

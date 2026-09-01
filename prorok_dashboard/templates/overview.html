@@ -22,9 +22,10 @@
   <a
     class="status-tab {% if status_filter == value %}is-active{% endif %}"
     href="{{ href }}"
+    data-status="{{ value or '' }}"
     hx-get="/partials/events{% if value %}?status={{ value }}{% endif %}"
+    hx-include="#event-search"
     hx-target="#events-list"
-    hx-push-url="{{ href }}"
   >{{ label }} <span>{{ count }}</span></a>
   {% endfor %}
 </nav>

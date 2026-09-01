@@ -35,13 +35,13 @@ def list_events(
         params.append(status)
 
     if q and q.strip():
-        needle = f"%{q.strip().lower()}%"
+        needle = f"%{q.strip().casefold()}%"
         clauses.append(
             "("
-            "LOWER(e.title) LIKE ? OR "
-            "LOWER(e.question) LIKE ? OR "
-            "LOWER(e.event_id) LIKE ? OR "
-            "LOWER(COALESCE(e.tags, '')) LIKE ?"
+            "CASEFOLD(e.title) LIKE ? OR "
+            "CASEFOLD(e.question) LIKE ? OR "
+            "CASEFOLD(e.event_id) LIKE ? OR "
+            "CASEFOLD(COALESCE(e.tags, '')) LIKE ?"
             ")"
         )
         params.extend([needle, needle, needle, needle])

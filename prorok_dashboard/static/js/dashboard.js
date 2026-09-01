@@ -66,15 +66,65 @@
     });
   }
 
-  document.body.addEventListener("htmx:afterRequest", (event) => {
-    const trigger = event.detail && event.detail.elt;
-    if (!trigger || !trigger.classList || !trigger.classList.contains("status-tab")) {
+  function syncFilterUrl({ push = false } = {}) {
+    const statusField = document.getElementById("status-field");
+    const searchField = document.getElementById("event-search");
+    if (!statusField || !searchField) {
       return;
     }
-    document.querySelectorAll(".status-tab").forEach((tab) => {
-      tab.classList.remove("is-active");
-    });
-    trigger.classList.add("is-active");
+
+    const url = new URL(window.location.href);
+    const status = statusField.value.trim();
+    const query = searchField.value.trim();
+
+    if (status) {
+      url.searchParams.set("status", status);
+    } else {
+      url.searchParams.delete("status");
+    }
+
+    if (query) {
+      url.searchParams.set("q", query);
+    } else {
+      url.searchParams.delete("q");
+    }
+
+    const state = { status, q: query };
+    if (push) {
+      window.history.pushState(state, "", url);
+    } else {
+      window.history.replaceState(state, "", url);
+    }
+  }
+
+  document.body.addEventListener("htmx:afterRequest", (event) => {
+    if (event.detail && event.detail.successful === false) {
+      return;
+    }
+
+    const trigger = event.detail && event.detail.elt;
+    if (!trigger) {
+      return;
+    }
+
+    if (trigger.classList && trigger.classList.contains("status-tab")) {
+      const statusField = document.getElementById("status-field");
+      const status = trigger.dataset.status || "";
+      if (statusField) {
+        statusField.value = status;
+      }
+
+      document.querySelectorAll(".status-tab").forEach((tab) => {
+        tab.classList.remove("is-active");
+      });
+      trigger.classList.add("is-active");
+      syncFilterUrl({ push: true });
+      return;
+    }
+
+    if (trigger.id === "event-search") {
+      syncFilterUrl({ push: false });
+    }
   });
 
   if (document.readyState === "loading") {

@@ -17,6 +17,13 @@ REQUIRED_TABLES = frozenset({
 })
 
 
+def _casefold(value: object) -> str:
+    """Unicode-aware case folding exposed to SQLite as CASEFOLD()."""
+    if value is None:
+        return ""
+    return str(value).casefold()
+
+
 @contextmanager
 def readonly_connection(db_path: str) -> Iterator[sqlite3.Connection]:
     """Open one consistent read-only snapshot and close it after use."""
@@ -29,6 +36,7 @@ def readonly_connection(db_path: str) -> Iterator[sqlite3.Connection]:
             check_same_thread=False,
         )
         conn.row_factory = sqlite3.Row
+        conn.create_function("CASEFOLD", 1, _casefold, deterministic=True)
         conn.execute("PRAGMA query_only=ON")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("BEGIN")
