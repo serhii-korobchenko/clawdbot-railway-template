@@ -31,6 +31,15 @@ def test_htmx_filter_state_contract(logged_in_client):
     assert "window.history.replaceState" in script.text
 
 
+def test_static_assets_use_origin_relative_urls(logged_in_client):
+    response = logged_in_client.get("/")
+    assert response.status_code == 200
+    assert 'href="/static/css/app.css"' in response.text
+    assert 'src="/static/js/dashboard.js"' in response.text
+    assert 'href="http://testserver/static/css/app.css"' not in response.text
+    assert 'src="http://testserver/static/js/dashboard.js"' not in response.text
+
+
 def test_detail_contains_required_sections(logged_in_client):
     response = logged_in_client.get("/events/event-1")
     assert response.status_code == 200
