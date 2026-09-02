@@ -17,6 +17,16 @@ def test_status_filter_and_search(logged_in_client):
     assert "Test event" in search.text
 
 
+def test_empty_status_means_all(logged_in_client):
+    overview = logged_in_client.get("/?status=&q=Test")
+    assert overview.status_code == 200
+    assert "Test event" in overview.text
+
+    partial = logged_in_client.get("/partials/events?status=&q=Test")
+    assert partial.status_code == 200
+    assert "Test event" in partial.text
+
+
 def test_htmx_filter_state_contract(logged_in_client):
     response = logged_in_client.get("/?status=active&q=Test")
     assert response.status_code == 200
