@@ -11,6 +11,11 @@ from ..auth import is_authenticated
 
 router = APIRouter()
 StatusFilter = Literal["active", "paused", "resolved", "archived"]
+StatusQuery = Literal["", "active", "paused", "resolved", "archived"]
+
+
+def _normalize_status(status: StatusQuery | None) -> StatusFilter | None:
+    return status or None
 
 
 async def _load(
@@ -28,16 +33,17 @@ async def _load(
 @router.get("/")
 async def overview(
     request: Request,
-    status: StatusFilter | None = Query(default=None),
+    status: StatusQuery | None = Query(default=None),
     q: str | None = Query(default=None, max_length=300),
 ):
     if not is_authenticated(request):
         return RedirectResponse("/login", status_code=303)
 
     templates = request.app.state.templates
+    normalized_status = _normalize_status(status)
 
     try:
-        data = await _load(request, status=status, q=q)
+        data = await _load(request, status=normalized_status, q=q)
     except (UpstreamUnavailable, UpstreamError):
         return templates.TemplateResponse(
             request=request,
@@ -57,7 +63,7 @@ async def overview(
         name="overview.html",
         context={
             "data": data,
-            "status_filter": status,
+            "status_filter": normalized_status,
             "q": q or "",
         },
     )
@@ -66,16 +72,17 @@ async def overview(
 @router.get("/partials/events")
 async def events_partial(
     request: Request,
-    status: StatusFilter | None = Query(default=None),
+    status: StatusQuery | None = Query(default=None),
     q: str | None = Query(default=None, max_length=300),
 ):
     if not is_authenticated(request):
         return PlainTextResponse("Unauthorized", status_code=401)
 
     templates = request.app.state.templates
+    normalized_status = _normalize_status(status)
 
     try:
-        data = await _load(request, status=status, q=q)
+        data = await _load(request, status=normalized_status, q=q)
     except (UpstreamUnavailable, UpstreamError):
         return PlainTextResponse(
             "PROROK data temporarily unavailable",
@@ -87,7 +94,7 @@ async def events_partial(
         name="partials/events_list.html",
         context={
             "data": data,
-            "status_filter": status,
+            "status_filter": normalized_status,
             "q": q or "",
         },
     )
