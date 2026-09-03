@@ -85,6 +85,12 @@ function currentAssessmentLine(event) {
   return `Поточна оцінка: ${a.probability_percent}%${confidence}`;
 }
 
+function shortText(value, max = 700) {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
 async function eventsPresentation() {
   const items = await activeEvents();
   const blocks = [textBlock(`Активні прогнози: ${items.length}`)];
@@ -116,6 +122,7 @@ async function eventPresentation(eventId) {
   const probability = current ? `${current.probability_percent}%` : "—";
   const confidence = current?.confidence || "—";
   const horizon = event.forecast_horizon || "—";
+  const token = eventToken(event.event_id);
 
   return {
     title: event.title,
@@ -133,11 +140,91 @@ async function eventPresentation(eventId) {
         ].join("\n"),
       ),
       buttonsBlock([
+        button("🧾 Evidence", `event-evidence:${token}`),
+        button("📈 Історія", `event-history:${token}`),
+      ]),
+      buttonsBlock([
         button("◀️ До прогнозів", "events"),
         button("🏠 Головне меню", "home"),
       ]),
     ],
   };
+}
+
+async function eventEvidencePresentation(eventId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+  const token = eventToken(event.event_id);
+  const blocks = [textBlock(`Evidence: ${evidence.length}`)];
+
+  if (!evidence.length) {
+    blocks.push(textBlock("Для цієї події evidence поки немає."));
+  } else {
+    for (const item of evidence.slice(0, 10)) {
+      const source = item.source || {};
+      const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
+      blocks.push(
+        textBlock(
+          [
+            `#${item.evidence_id} · ${item.direction}${item.strength ? ` · ${item.strength}` : ""}`,
+            shortText(item.summary, 550),
+            `Джерело: ${shortText(sourceLabel, 180)}`,
+            `Дата: ${item.created_at || "—"}`,
+            `Relevance: ${item.relevance ?? "—"} · Credibility: ${item.credibility ?? "—"}`,
+          ].join("\n"),
+        ),
+      );
+    }
+    if (evidence.length > 10) {
+      blocks.push(textBlock(`Показано 10 з ${evidence.length} evidence.`));
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До події", `event:${token}`),
+      button("📊 До прогнозів", "events"),
+    ]),
+  );
+  return { title: `🧾 ${event.title}`, tone: "neutral", blocks };
+}
+
+async function eventHistoryPresentation(eventId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const assessments = Array.isArray(data.assessments) ? data.assessments : [];
+  const token = eventToken(event.event_id);
+  const blocks = [textBlock(`Assessment history: ${assessments.length}`)];
+
+  if (!assessments.length) {
+    blocks.push(textBlock("Історії оцінок поки немає."));
+  } else {
+    for (const item of assessments.slice(0, 12)) {
+      const delta = item.delta_from_previous;
+      const deltaText = delta === null || delta === undefined ? "—" : `${delta > 0 ? "+" : ""}${delta} п.п.`;
+      blocks.push(
+        textBlock(
+          [
+            `${item.assessed_at || "—"} · ${item.probability_percent}%`,
+            `Δ: ${deltaText} · confidence: ${item.confidence || "—"}`,
+            item.rationale ? `Причина: ${shortText(item.rationale, 420)}` : null,
+          ].filter(Boolean).join("\n"),
+        ),
+      );
+    }
+    if (assessments.length > 12) {
+      blocks.push(textBlock(`Показано 12 з ${assessments.length} assessment.`));
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До події", `event:${token}`),
+      button("📊 До прогнозів", "events"),
+    ]),
+  );
+  return { title: `📈 ${event.title}`, tone: "neutral", blocks };
 }
 
 function placeholderPresentation(title) {
@@ -154,6 +241,14 @@ function placeholderPresentation(title) {
 async function renderPayload(payload) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
+  if (payload.startsWith("event-evidence:")) {
+    const eventId = await resolveActiveEventId(payload.slice("event-evidence:".length));
+    return await eventEvidencePresentation(eventId);
+  }
+  if (payload.startsWith("event-history:")) {
+    const eventId = await resolveActiveEventId(payload.slice("event-history:".length));
+    return await eventHistoryPresentation(eventId);
+  }
   if (payload.startsWith("event:")) {
     const eventId = await resolveActiveEventId(payload.slice("event:".length));
     return await eventPresentation(eventId);
