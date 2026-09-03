@@ -1,11 +1,17 @@
+import { createHash } from "node:crypto";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const API_BASE = process.env.PROROK_API_BASE_URL || "http://127.0.0.1:18880";
 const API_TOKEN = process.env.PROROK_API_TOKEN || "";
 const CALLBACK_NAMESPACE = "prorok";
+const EVENT_TOKEN_LENGTH = 12;
 
 function callbackValue(payload) {
   return `${CALLBACK_NAMESPACE}:${payload}`;
+}
+
+function eventToken(eventId) {
+  return createHash("sha256").update(String(eventId)).digest("hex").slice(0, EVENT_TOKEN_LENGTH);
 }
 
 function textBlock(text) {
@@ -55,6 +61,23 @@ async function apiGet(path) {
   return await response.json();
 }
 
+async function activeEvents() {
+  const data = await apiGet("/api/v1/events?status=active");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function resolveActiveEventId(token) {
+  const items = await activeEvents();
+  const matches = items.filter((event) => eventToken(event.event_id) === token);
+  if (matches.length === 1) {
+    return String(matches[0].event_id);
+  }
+  if (matches.length > 1) {
+    throw new Error("Event callback token collision");
+  }
+  throw new Error("Event is no longer active or callback is stale");
+}
+
 function currentAssessmentLine(event) {
   const a = event.current_assessment;
   if (!a) return "Поточна оцінка: немає";
@@ -63,27 +86,19 @@ function currentAssessmentLine(event) {
 }
 
 async function eventsPresentation() {
-  const data = await apiGet("/api/v1/events?status=active");
-  const items = Array.isArray(data.items) ? data.items : [];
-  const blocks = [
-    textBlock(`Активні прогнози: ${items.length}`),
-  ];
+  const items = await activeEvents();
+  const blocks = [textBlock(`Активні прогнози: ${items.length}`)];
 
   if (!items.length) {
     blocks.push(textBlock("Активних прогнозів немає."));
   } else {
     for (const event of items.slice(0, 12)) {
-      const safeId = String(event.event_id || "");
-      const payload = `event:${safeId}`;
-      if (callbackValue(payload).length > 64) {
-        blocks.push(textBlock(`• ${event.title}\n${currentAssessmentLine(event)}`));
-        continue;
-      }
+      const token = eventToken(event.event_id);
       blocks.push(
         buttonsBlock([
           button(
             `${event.current_assessment?.probability_percent ?? "—"}% · ${event.title}`.slice(0, 80),
-            payload,
+            `event:${token}`,
           ),
         ]),
       );
@@ -139,7 +154,10 @@ function placeholderPresentation(title) {
 async function renderPayload(payload) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
-  if (payload.startsWith("event:")) return await eventPresentation(payload.slice("event:".length));
+  if (payload.startsWith("event:")) {
+    const eventId = await resolveActiveEventId(payload.slice("event:".length));
+    return await eventPresentation(eventId);
+  }
   if (payload === "evidence") return placeholderPresentation("🧾 Evidence");
   if (payload === "refresh") return placeholderPresentation("🔄 Останнє оновлення");
   if (payload === "archive") return placeholderPresentation("🗂 Архів");
