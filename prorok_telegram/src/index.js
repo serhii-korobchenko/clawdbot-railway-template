@@ -5,6 +5,7 @@ const API_BASE = process.env.PROROK_API_BASE_URL || "http://127.0.0.1:18880";
 const API_TOKEN = process.env.PROROK_API_TOKEN || "";
 const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
+const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
 
 function callbackValue(payload) {
   return `${CALLBACK_NAMESPACE}:${payload}`;
@@ -39,7 +40,7 @@ function mainPresentation() {
       textBlock("Оберіть розділ керування прогнозами."),
       buttonsBlock([
         button("📊 Прогнози", "events", "primary"),
-        button("🧾 Evidence", "evidence"),
+        button("🧾 Evidence", "evidence:all:0"),
         button("🔄 Останнє оновлення", "refresh"),
         button("🗂 Архів", "archive"),
         button("⚙️ Керування", "manage"),
@@ -61,21 +62,22 @@ async function apiGet(path) {
   return await response.json();
 }
 
+async function allEvents() {
+  const data = await apiGet("/api/v1/events");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
 async function activeEvents() {
   const data = await apiGet("/api/v1/events?status=active");
   return Array.isArray(data.items) ? data.items : [];
 }
 
-async function resolveActiveEventId(token) {
-  const items = await activeEvents();
+async function resolveEventId(token, { activeOnly = false } = {}) {
+  const items = activeOnly ? await activeEvents() : await allEvents();
   const matches = items.filter((event) => eventToken(event.event_id) === token);
-  if (matches.length === 1) {
-    return String(matches[0].event_id);
-  }
-  if (matches.length > 1) {
-    throw new Error("Event callback token collision");
-  }
-  throw new Error("Event is no longer active or callback is stale");
+  if (matches.length === 1) return String(matches[0].event_id);
+  if (matches.length > 1) throw new Error("Event callback token collision");
+  throw new Error(activeOnly ? "Event is no longer active or callback is stale" : "Event callback is stale");
 }
 
 function currentAssessmentLine(event) {
@@ -89,6 +91,12 @@ function shortText(value, max = 700) {
   const text = String(value || "").trim();
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+function evidenceDirectionLabel(direction) {
+  if (direction === "indicator") return "🟢 indicator";
+  if (direction === "counterindicator") return "🔴 counterindicator";
+  return "⚪ neutral";
 }
 
 async function eventsPresentation() {
@@ -176,9 +184,7 @@ async function eventEvidencePresentation(eventId) {
         ),
       );
     }
-    if (evidence.length > 10) {
-      blocks.push(textBlock(`Показано 10 з ${evidence.length} evidence.`));
-    }
+    if (evidence.length > 10) blocks.push(textBlock(`Показано 10 з ${evidence.length} evidence.`));
   }
 
   blocks.push(
@@ -213,9 +219,7 @@ async function eventHistoryPresentation(eventId) {
         ),
       );
     }
-    if (assessments.length > 12) {
-      blocks.push(textBlock(`Показано 12 з ${assessments.length} assessment.`));
-    }
+    if (assessments.length > 12) blocks.push(textBlock(`Показано 12 з ${assessments.length} assessment.`));
   }
 
   blocks.push(
@@ -225,6 +229,80 @@ async function eventHistoryPresentation(eventId) {
     ]),
   );
   return { title: `📈 ${event.title}`, tone: "neutral", blocks };
+}
+
+async function collectGlobalEvidence() {
+  const events = await allEvents();
+  const details = await Promise.all(
+    events.map(async (event) => {
+      try {
+        return await apiGet(`/api/v1/events/${encodeURIComponent(event.event_id)}`);
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const rows = [];
+  for (const detail of details.filter(Boolean)) {
+    const event = detail.event;
+    for (const item of Array.isArray(detail.evidence) ? detail.evidence : []) {
+      rows.push({ event, item });
+    }
+  }
+
+  rows.sort((a, b) => String(b.item.created_at || "").localeCompare(String(a.item.created_at || "")));
+  return rows;
+}
+
+async function globalEvidencePresentation(filter = "all", page = 0) {
+  const rows = await collectGlobalEvidence();
+  const filtered = filter === "all" ? rows : rows.filter(({ item }) => item.direction === filter);
+  const maxPage = Math.max(0, Math.ceil(filtered.length / GLOBAL_EVIDENCE_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * GLOBAL_EVIDENCE_PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + GLOBAL_EVIDENCE_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Evidence: ${filtered.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+    buttonsBlock([
+      button(filter === "all" ? "✅ Усі" : "Усі", "evidence:all:0"),
+      button(filter === "indicator" ? "✅ 🟢 Indicators" : "🟢 Indicators", "evidence:indicator:0"),
+      button(
+        filter === "counterindicator" ? "✅ 🔴 Counter" : "🔴 Counter",
+        "evidence:counterindicator:0",
+      ),
+    ]),
+  ];
+
+  if (!pageRows.length) {
+    blocks.push(textBlock("Evidence за цим фільтром немає."));
+  } else {
+    for (const { event, item } of pageRows) {
+      const source = item.source || {};
+      const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
+      const token = eventToken(event.event_id);
+      blocks.push(
+        textBlock(
+          [
+            `#${item.evidence_id} · ${evidenceDirectionLabel(item.direction)}${item.strength ? ` · ${item.strength}` : ""}`,
+            `Подія: ${shortText(event.title, 180)}`,
+            shortText(item.summary, 420),
+            `Джерело: ${shortText(sourceLabel, 180)}`,
+            `Дата: ${item.created_at || "—"}`,
+          ].join("\n"),
+        ),
+      );
+      blocks.push(buttonsBlock([button("↗️ Відкрити подію", `event-any:${token}`)]));
+    }
+  }
+
+  const pager = [];
+  if (safePage > 0) pager.push(button("◀️ Попередня", `evidence:${filter}:${safePage - 1}`));
+  if (safePage < maxPage) pager.push(button("Наступна ▶️", `evidence:${filter}:${safePage + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+  blocks.push(buttonsBlock([button("🏠 Головне меню", "home")]));
+
+  return { title: "🧾 Evidence", tone: "neutral", blocks };
 }
 
 function placeholderPresentation(title) {
@@ -241,19 +319,27 @@ function placeholderPresentation(title) {
 async function renderPayload(payload) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
+  if (payload.startsWith("evidence:")) {
+    const [, filter = "all", rawPage = "0"] = payload.split(":");
+    const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
+    return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
+  }
   if (payload.startsWith("event-evidence:")) {
-    const eventId = await resolveActiveEventId(payload.slice("event-evidence:".length));
+    const eventId = await resolveEventId(payload.slice("event-evidence:".length), { activeOnly: true });
     return await eventEvidencePresentation(eventId);
   }
   if (payload.startsWith("event-history:")) {
-    const eventId = await resolveActiveEventId(payload.slice("event-history:".length));
+    const eventId = await resolveEventId(payload.slice("event-history:".length), { activeOnly: true });
     return await eventHistoryPresentation(eventId);
   }
-  if (payload.startsWith("event:")) {
-    const eventId = await resolveActiveEventId(payload.slice("event:".length));
+  if (payload.startsWith("event-any:")) {
+    const eventId = await resolveEventId(payload.slice("event-any:".length));
     return await eventPresentation(eventId);
   }
-  if (payload === "evidence") return placeholderPresentation("🧾 Evidence");
+  if (payload.startsWith("event:")) {
+    const eventId = await resolveEventId(payload.slice("event:".length), { activeOnly: true });
+    return await eventPresentation(eventId);
+  }
   if (payload === "refresh") return placeholderPresentation("🔄 Останнє оновлення");
   if (payload === "archive") return placeholderPresentation("🗂 Архів");
   if (payload === "manage") return placeholderPresentation("⚙️ Керування");
@@ -271,10 +357,7 @@ export default definePluginEntry({
       acceptsArgs: false,
       requireAuth: true,
       channels: ["telegram"],
-      handler: async () => ({
-        text: "PROROK",
-        presentation: mainPresentation(),
-      }),
+      handler: async () => ({ text: "PROROK", presentation: mainPresentation() }),
     });
 
     api.registerInteractiveHandler({
