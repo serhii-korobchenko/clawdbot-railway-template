@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-plugin-prorok-telegram",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "peerDependencies": {
+    "openclaw": ">=2026.5.22"
+  },
+  "openclaw": {
+    "extensions": [
+      "./src/index.js"
+    ]
+  }
+}
