@@ -82,7 +82,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
-# Python dependencies for skills
+# Python dependencies for skills and the PROROK read-only API
 COPY requirements.txt* ./
 RUN if [ -f requirements.txt ]; then \
       pip3 install --break-system-packages --no-cache-dir -r requirements.txt; \
@@ -101,4 +101,4 @@ COPY . /app
 EXPOSE 8080
 
 ENTRYPOINT ["tini", "--"]
-CMD ["sh", "-c", "node scripts/apply-openclaw-gdoc-fallback.js || echo '[gdoc-fallback-patch] failed; starting server anyway'; node src/server.js"]
+CMD ["sh", "-c", "node scripts/apply-openclaw-gdoc-fallback.js || echo '[gdoc-fallback-patch] failed; starting server anyway'; exec node src/start-with-prorok-api.js"]

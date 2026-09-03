@@ -1,0 +1,43 @@
+<article class="event-card status-{{ event.status }}">
+  <div class="card-topline">
+    <span class="status-badge status-{{ event.status }}">{{ event.status|upper }}</span>
+    <span class="horizon">Горизонт: {{ event.forecast_horizon|fmt_date }}</span>
+  </div>
+
+  <h2><a href="/events/{{ event.event_id }}">{{ event.title }}</a></h2>
+  <p class="question">{{ event.question }}</p>
+
+  {% if event.current_assessment %}
+  <div class="forecast-summary">
+    <div class="probability">{{ event.current_assessment.probability_percent }}%</div>
+    <div>
+      <div class="confidence">{{ event.current_assessment.confidence|capitalize }} confidence</div>
+      {% if event.current_assessment.delta_from_previous is not none %}
+      <div class="delta">
+        {{ event.current_assessment.delta_from_previous|delta_symbol }}
+        {{ event.current_assessment.delta_from_previous|delta_text }}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="forecast-summary no-assessment">
+    <div class="probability">—</div>
+    <div class="confidence">Оцінки ще немає</div>
+  </div>
+  {% endif %}
+
+  <div class="card-metrics">
+    <span>Оцінки <strong>{{ event.assessment_count }}</strong></span>
+    <span>Evidence <strong>{{ event.evidence_count }}</strong></span>
+    <span>Джерела <strong>{{ event.source_count }}</strong></span>
+  </div>
+
+  <div class="card-footer">
+    {% if event.current_assessment %}
+    Остання оцінка: {{ event.current_assessment.assessed_at|fmt_date }}
+    {% else %}
+    Оцінок ще не було
+    {% endif %}
+  </div>
+</article>

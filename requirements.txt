@@ -6,3 +6,5 @@ certifi==2026.4.22
 openai==2.54.0
 google-api-python-client==2.169.0
 google-auth==2.40.1
+fastapi==0.141.1
+uvicorn==0.52.4

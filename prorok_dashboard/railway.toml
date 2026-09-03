@@ -1,0 +1,8 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "prorok_dashboard/Dockerfile"
+
+[deploy]
+healthcheckPath = "/healthz"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
