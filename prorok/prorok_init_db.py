@@ -104,6 +104,8 @@ def ensure_required_objects(conn: sqlite3.Connection) -> None:
         "sources",
         "evidence_items",
         "assessments",
+        "refresh_runs",
+        "refresh_event_results",
     }
     required_views = {
         "latest_event_state",
