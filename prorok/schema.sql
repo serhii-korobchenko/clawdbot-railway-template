@@ -90,6 +90,58 @@ CREATE TABLE IF NOT EXISTS assessments (
     FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS refresh_runs (
+    refresh_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER,
+    mode TEXT NOT NULL DEFAULT 'dry_run'
+        CHECK(mode IN ('dry_run', 'apply')),
+    trigger_source TEXT NOT NULL
+        CHECK(trigger_source IN ('scheduled', 'telegram', 'manual_cli', 'system')),
+    scope TEXT NOT NULL DEFAULT 'all'
+        CHECK(scope IN ('all', 'event')),
+    target_event_id TEXT,
+    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running'
+        CHECK(status IN ('running', 'completed', 'failed', 'partial')),
+    events_checked INTEGER NOT NULL DEFAULT 0 CHECK(events_checked >= 0),
+    events_with_new_evidence INTEGER NOT NULL DEFAULT 0 CHECK(events_with_new_evidence >= 0),
+    new_evidence_count INTEGER NOT NULL DEFAULT 0 CHECK(new_evidence_count >= 0),
+    recommendations_count INTEGER NOT NULL DEFAULT 0 CHECK(recommendations_count >= 0),
+    no_change_count INTEGER NOT NULL DEFAULT 0 CHECK(no_change_count >= 0),
+    error_count INTEGER NOT NULL DEFAULT 0 CHECK(error_count >= 0),
+    model_used TEXT,
+    summary TEXT,
+    errors TEXT,
+    FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE SET NULL,
+    FOREIGN KEY(target_event_id) REFERENCES events(event_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS refresh_event_results (
+    refresh_event_result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    refresh_id INTEGER NOT NULL,
+    event_id TEXT,
+    event_title_snapshot TEXT NOT NULL,
+    baseline_assessment_id INTEGER,
+    baseline_probability INTEGER CHECK(baseline_probability BETWEEN 0 AND 100),
+    outcome TEXT NOT NULL
+        CHECK(outcome IN ('new_evidence', 'no_new_evidence', 'error', 'skipped')),
+    new_evidence_count INTEGER NOT NULL DEFAULT 0 CHECK(new_evidence_count >= 0),
+    indicator_count INTEGER NOT NULL DEFAULT 0 CHECK(indicator_count >= 0),
+    counterindicator_count INTEGER NOT NULL DEFAULT 0 CHECK(counterindicator_count >= 0),
+    recommended_probability INTEGER CHECK(recommended_probability BETWEEN 0 AND 100),
+    recommendation_confidence TEXT
+        CHECK(recommendation_confidence IN ('low', 'medium', 'high')),
+    change_recommended INTEGER NOT NULL DEFAULT 0 CHECK(change_recommended IN (0, 1)),
+    recommendation_reason TEXT,
+    summary TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY(refresh_id) REFERENCES refresh_runs(refresh_id) ON DELETE CASCADE,
+    FOREIGN KEY(event_id) REFERENCES events(event_id) ON DELETE SET NULL,
+    FOREIGN KEY(baseline_assessment_id) REFERENCES assessments(assessment_id) ON DELETE SET NULL,
+    UNIQUE(refresh_id, event_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_status
 ON events(status);
 
@@ -113,6 +165,18 @@ ON evidence_items(source_id);
 
 CREATE INDEX IF NOT EXISTS idx_assessments_event_time
 ON assessments(event_id, assessed_at DESC, assessment_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_runs_finished
+ON refresh_runs(finished_at DESC, refresh_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_runs_status
+ON refresh_runs(status);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_event_results_refresh
+ON refresh_event_results(refresh_id);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_event_results_event
+ON refresh_event_results(event_id, refresh_id DESC);
 
 CREATE VIEW IF NOT EXISTS latest_event_state AS
 SELECT
@@ -211,7 +275,7 @@ END;
 
 INSERT INTO meta(key, value)
 VALUES
-    ('schema_version', '1'),
+    ('schema_version', '2'),
     ('probability_scale', '0-5%: Віддалена можливість
 10-20%: Низька ймовірність
 25-35%: Малоймовірно
