@@ -1,0 +1,14 @@
+{
+  "id": "prorok-telegram",
+  "name": "PROROK Telegram Control UI",
+  "description": "Deterministic native Telegram control surface for PROROK.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  }
+}
