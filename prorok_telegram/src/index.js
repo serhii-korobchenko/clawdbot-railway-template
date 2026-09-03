@@ -292,7 +292,7 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
           ].join("\n"),
         ),
       );
-      blocks.push(buttonsBlock([button("↗️ Відкрити подію", `event-any:${token}`)]));
+      blocks.push(buttonsBlock([button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`)]));
     }
   }
 
