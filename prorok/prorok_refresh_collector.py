@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 try:
     from .prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
@@ -40,6 +41,19 @@ TERMINAL_JOB_STATES = {
     "source_missing",
     "parse_failed",
     "encoding_failed",
+}
+
+BANNED_SOURCE_DOMAINS = {
+    "facebook.com",
+    "medium.com",
+    "reddit.com",
+    "substack.com",
+    "tiktok.com",
+    "twitter.com",
+    "wikipedia.org",
+    "x.com",
+    "youtu.be",
+    "youtube.com",
 }
 
 
@@ -331,6 +345,84 @@ def validate_candidate_freshness(
                 f"published_at {candidate.published_at!r} is after baseline "
                 f"assessment {baseline['assessed_at']!r}, so freshness cannot be "
                 "missed_baseline_evidence"
+            )
+
+
+def validate_candidate_source_policy(parsed: Any) -> None:
+    """Reject candidate evidence from domains forbidden by the refresh contract."""
+    for candidate in parsed.candidates:
+        hostname = (urlparse(candidate.url).hostname or "").lower().rstrip(".")
+        if not hostname:
+            continue
+
+        banned = next(
+            (
+                domain
+                for domain in BANNED_SOURCE_DOMAINS
+                if hostname == domain or hostname.endswith(f".{domain}")
+            ),
+            None,
+        )
+        if banned is not None:
+            raise RefreshParseError(
+                "source policy violation in "
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
+                f"domain {hostname!r} is banned by the refresh evidence policy"
+            )
+
+
+def validate_candidate_url_date_consistency(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    parsed: Any,
+) -> None:
+    """Reject conflicting publication dates for the same URL across refreshes."""
+    for candidate in parsed.candidates:
+        current_dt, _ = _parse_iso_datetime(
+            candidate.published_at,
+            f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
+        )
+        current_date = current_dt.date().isoformat()
+
+        prior_rows = conn.execute(
+            """
+            SELECT DISTINCT c.published_at
+            FROM refresh_candidate_evidence c
+            JOIN refresh_event_results rer
+              ON rer.refresh_event_result_id = c.refresh_event_result_id
+            WHERE rer.event_id = ?
+              AND c.url = ?
+              AND c.refresh_event_result_id != ?
+              AND c.published_at IS NOT NULL
+              AND TRIM(c.published_at) != ''
+            ORDER BY c.published_at
+            """,
+            (
+                row["event_id"],
+                candidate.url,
+                row["refresh_event_result_id"],
+            ),
+        ).fetchall()
+
+        if not prior_rows:
+            continue
+
+        prior_raw = [str(prior["published_at"]) for prior in prior_rows]
+        prior_dates: set[str] = set()
+        for prior_value in prior_raw:
+            prior_dt, _ = _parse_iso_datetime(
+                prior_value,
+                "historical candidate published_at",
+            )
+            prior_dates.add(prior_dt.date().isoformat())
+
+        if prior_dates != {current_date}:
+            raise RefreshParseError(
+                "published_at conflict in "
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
+                f"URL {candidate.url!r} has current published_at "
+                f"{candidate.published_at!r}, while prior refresh candidate "
+                f"date(s) are {', '.join(sorted(prior_raw))}"
             )
 
 
@@ -631,6 +723,8 @@ def collect_one(
             expected_baseline_probability=row["baseline_probability"],
         )
         validate_candidate_freshness(conn, row, parsed)
+        validate_candidate_source_policy(parsed)
+        validate_candidate_url_date_consistency(conn, row, parsed)
     except RefreshParseError as exc:
         with conn:
             mark_failure(
