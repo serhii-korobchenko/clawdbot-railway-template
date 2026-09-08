@@ -20,6 +20,7 @@ import sqlite3
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -239,6 +240,98 @@ def summary_fallback(run: CronRun) -> tuple[str, str] | None:
 
 def candidate_rows(parsed: Any) -> list[dict[str, Any]]:
     return [candidate.as_dict() for candidate in parsed.candidates]
+
+
+def _parse_iso_datetime(value: str, field: str) -> tuple[datetime, bool]:
+    """Parse an ISO date/datetime and return (UTC datetime, is_date_only)."""
+    raw = value.strip()
+    if not raw:
+        raise RefreshParseError(f"{field} must not be empty")
+
+    is_date_only = len(raw) == 10 and raw[4] == "-" and raw[7] == "-"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RefreshParseError(
+            f"{field} must be an ISO-8601 date or datetime; got {value!r}"
+        ) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+
+    return parsed, is_date_only
+
+
+def validate_candidate_freshness(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    parsed: Any,
+) -> None:
+    """Validate candidate freshness against the baseline assessment timestamp.
+
+    Date-only candidate values on the same calendar day as the assessment are
+    not considered provably newer, because their time of publication is
+    unknown.
+    """
+    if not parsed.candidates:
+        return
+
+    baseline_assessment_id = row["baseline_assessment_id"]
+    if baseline_assessment_id is None:
+        raise RefreshParseError(
+            "candidate freshness validation requires baseline_assessment_id"
+        )
+
+    baseline = conn.execute(
+        """
+        SELECT assessed_at
+        FROM assessments
+        WHERE assessment_id = ?
+          AND event_id = ?
+        """,
+        (baseline_assessment_id, row["event_id"]),
+    ).fetchone()
+
+    if baseline is None or not baseline["assessed_at"]:
+        raise RefreshParseError(
+            "candidate freshness validation could not resolve baseline assessed_at"
+        )
+
+    baseline_dt, _ = _parse_iso_datetime(
+        str(baseline["assessed_at"]),
+        "baseline assessed_at",
+    )
+
+    for candidate in parsed.candidates:
+        published_dt, published_is_date_only = _parse_iso_datetime(
+            candidate.published_at,
+            f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
+        )
+
+        if published_is_date_only:
+            is_after_baseline = published_dt.date() > baseline_dt.date()
+        else:
+            is_after_baseline = published_dt > baseline_dt
+
+        if candidate.freshness == "new_after_last_assessment" and not is_after_baseline:
+            raise RefreshParseError(
+                "freshness mismatch in "
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
+                f"published_at {candidate.published_at!r} is not after baseline "
+                f"assessment {baseline['assessed_at']!r}, so freshness cannot be "
+                "new_after_last_assessment"
+            )
+
+        if candidate.freshness == "missed_baseline_evidence" and is_after_baseline:
+            raise RefreshParseError(
+                "freshness mismatch in "
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
+                f"published_at {candidate.published_at!r} is after baseline "
+                f"assessment {baseline['assessed_at']!r}, so freshness cannot be "
+                "missed_baseline_evidence"
+            )
 
 
 def mark_failure(
@@ -537,6 +630,7 @@ def collect_one(
             expected_event_id=row["event_id"],
             expected_baseline_probability=row["baseline_probability"],
         )
+        validate_candidate_freshness(conn, row, parsed)
     except RefreshParseError as exc:
         with conn:
             mark_failure(
