@@ -213,7 +213,7 @@ reason: <1-3 речення, якщо нових якісних джерел н�
 
 CANDIDATE_EVIDENCE:
 1.
-direction: indicator|counterindicator|neutral
+direction: indicator|counterindicator
 strength: weak|medium|strong
 relevance: 0-100
 credibility: 0-100
