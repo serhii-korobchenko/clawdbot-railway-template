@@ -161,8 +161,9 @@ def extract_final_assistant_text(session_path: Path) -> str:
     last_text: str | None = None
 
     for item in read_jsonl(session_path):
-        role = item.get("role")
-        content = item.get("content")
+        message = item.get("message") if isinstance(item.get("message"), dict) else item
+        role = message.get("role")
+        content = message.get("content")
 
         if role != "assistant":
             continue
