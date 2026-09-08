@@ -506,6 +506,166 @@ def test_date_only_same_baseline_day_is_not_provably_new(tmp_path: Path) -> None
     assert batch["status"] == "failed"
 
 
+def test_source_policy_rejects_banned_domain(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "https://example.com/a",
+        "https://www.facebook.com/example/post/123",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert result["job_state"] == "parse_failed"
+    assert "source policy violation" in result["parse_error"]
+    assert "facebook.com" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
+
+
+def test_source_policy_rejects_banned_subdomain(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "https://example.com/a",
+        "https://m.youtube.com/watch?v=abc",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert "source policy violation" in result["parse_error"]
+    assert "youtube.com" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
+
+
+def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+
+    conn = sqlite3.connect(db)
+    prior_refresh_id = conn.execute(
+        """
+        INSERT INTO refresh_runs(
+            mode, trigger_source, scope, target_event_id, status, phase,
+            target_count, scheduled_count
+        )
+        VALUES('dry_run','manual_cli','event','event_a','completed','done',1,1)
+        """
+    ).lastrowid
+    prior_result_id = conn.execute(
+        """
+        INSERT INTO refresh_event_results(
+            refresh_id,event_id,event_title_snapshot,baseline_assessment_id,
+            baseline_probability,job_state,outcome,cron_id
+        )
+        VALUES(?, 'event_a', 'Event A', 1, 20, 'completed', 'new_evidence', 'prior-cron')
+        """,
+        (prior_refresh_id,),
+    ).lastrowid
+    conn.execute(
+        """
+        INSERT INTO refresh_candidate_evidence(
+            refresh_event_result_id,ordinal,direction,strength,relevance,
+            credibility,title,source,url,published_at,summary,why_it_matters,
+            duplicate_risk,freshness
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            prior_result_id, 1, "indicator", "medium", 90, 90,
+            "Prior", "Example", "https://example.com/a", "2026-09-05",
+            "Prior summary", "Prior why", "low", "new_after_last_assessment",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "published_at: 2026-09-08",
+        "published_at: 2026-09-09",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert result["job_state"] == "parse_failed"
+    assert "published_at conflict" in result["parse_error"]
+    assert "2026-09-05" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
+
+
+def test_url_date_consistency_accepts_same_calendar_date(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+
+    conn = sqlite3.connect(db)
+    prior_refresh_id = conn.execute(
+        """
+        INSERT INTO refresh_runs(
+            mode, trigger_source, scope, target_event_id, status, phase,
+            target_count, scheduled_count
+        )
+        VALUES('dry_run','manual_cli','event','event_a','completed','done',1,1)
+        """
+    ).lastrowid
+    prior_result_id = conn.execute(
+        """
+        INSERT INTO refresh_event_results(
+            refresh_id,event_id,event_title_snapshot,baseline_assessment_id,
+            baseline_probability,job_state,outcome,cron_id
+        )
+        VALUES(?, 'event_a', 'Event A', 1, 20, 'completed', 'new_evidence', 'prior-cron')
+        """,
+        (prior_refresh_id,),
+    ).lastrowid
+    conn.execute(
+        """
+        INSERT INTO refresh_candidate_evidence(
+            refresh_event_result_id,ordinal,direction,strength,relevance,
+            credibility,title,source,url,published_at,summary,why_it_matters,
+            duplicate_risk,freshness
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            prior_result_id, 1, "indicator", "medium", 90, 90,
+            "Prior", "Example", "https://example.com/a", "2026-09-08T06:00:00Z",
+            "Prior summary", "Prior why", "low", "new_after_last_assessment",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    write_run(state)
+    write_session(state, POSITIVE_REPORT)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert len(candidates) == 1
+    assert candidates[0]["published_at"] == "2026-09-08"
+    assert batch["status"] == "completed"
+
+
 def test_complete_summary_fallback_when_session_missing(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     state = tmp_path / "state"
