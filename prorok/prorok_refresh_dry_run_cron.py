@@ -197,6 +197,16 @@ latest_rationale: {latest.rationale}
 8. Probability wording rule:
    - не називай band 10-20% “середньою ймовірністю”; це завжди “низька ймовірність”;
    - слово medium може стосуватися тільки confidence, strength або quality, але не probability band.
+9. STRICT OUTPUT SCHEMA COMPLIANCE:
+   - якщо є candidate evidence, КОЖЕН numbered candidate block ОБОВ'ЯЗКОВО повинен містити рівно всі 12 ключів:
+     direction, strength, relevance, credibility, title, source, url, published_at, summary, why_it_matters, duplicate_risk, freshness;
+   - не завершуй candidate block, поки всі 12 ключів не заповнені;
+   - duplicate_risk та freshness НІКОЛИ не пропускай;
+   - candidate ordinals мають бути послідовними 1..N без пропусків, N <= 3;
+   - якщо якісних candidate evidence немає, використовуй тільки NO_NEW_EVIDENCE_FOUND + reason і НЕ створюй numbered candidate blocks;
+   - перед фінальною відповіддю виконай внутрішню schema-перевірку всього report та виправ будь-яке пропущене/зайве поле;
+   - не виводь текст schema-перевірки: поверни тільки валідний PROROK_REFRESH_DRY_RUN report;
+   - DB_ACTION завжди має містити do_not_write: true.
 
 Формат фінальної відповіді:
 
@@ -225,6 +235,11 @@ summary: 1-2 речення
 why_it_matters: 1-2 речення
 duplicate_risk: low|medium|high
 freshness: new_after_last_assessment|missed_baseline_evidence
+
+ВАЖЛИВО ДЛЯ КОЖНОГО CANDIDATE:
+- наведений порядок 12 ключів є обов'язковим;
+- не пропускай жодного ключа, зокрема duplicate_risk і freshness;
+- для candidate 2. і 3. повторюй повний набір усіх 12 ключів.
 
 ASSESSMENT_RECOMMENDATION:
 recommended_probability: <число або n/a>
