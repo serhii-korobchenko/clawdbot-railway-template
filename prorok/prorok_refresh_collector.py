@@ -32,7 +32,7 @@ except ImportError:  # direct script execution from /app/prorok
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
 DEFAULT_STATE_DIR = "/data/.openclaw"
-COLLECTOR_VERSION = "1"
+COLLECTOR_VERSION = "2"
 TERMINAL_JOB_STATES = {
     "completed",
     "schedule_failed",
@@ -278,24 +278,25 @@ def _parse_iso_datetime(value: str, field: str) -> tuple[datetime, bool]:
     return parsed, is_date_only
 
 
-def validate_candidate_freshness(
+def compute_candidate_freshness(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
     parsed: Any,
-) -> None:
-    """Validate candidate freshness against the baseline assessment timestamp.
+) -> dict[int, str]:
+    """Compute authoritative freshness from publication time and baseline.
 
-    Date-only candidate values on the same calendar day as the assessment are
-    not considered provably newer, because their time of publication is
-    unknown.
+    The LLM-provided freshness value remains in transcript_raw for audit/debug,
+    but it is not trusted for persistence. Date-only candidate values on the
+    same calendar day as the baseline assessment are conservatively treated as
+    missed_baseline_evidence because their publication time is unknown.
     """
     if not parsed.candidates:
-        return
+        return {}
 
     baseline_assessment_id = row["baseline_assessment_id"]
     if baseline_assessment_id is None:
         raise RefreshParseError(
-            "candidate freshness validation requires baseline_assessment_id"
+            "candidate freshness computation requires baseline_assessment_id"
         )
 
     baseline = conn.execute(
@@ -310,13 +311,15 @@ def validate_candidate_freshness(
 
     if baseline is None or not baseline["assessed_at"]:
         raise RefreshParseError(
-            "candidate freshness validation could not resolve baseline assessed_at"
+            "candidate freshness computation could not resolve baseline assessed_at"
         )
 
     baseline_dt, _ = _parse_iso_datetime(
         str(baseline["assessed_at"]),
         "baseline assessed_at",
     )
+
+    computed: dict[int, str] = {}
 
     for candidate in parsed.candidates:
         published_dt, published_is_date_only = _parse_iso_datetime(
@@ -329,23 +332,13 @@ def validate_candidate_freshness(
         else:
             is_after_baseline = published_dt > baseline_dt
 
-        if candidate.freshness == "new_after_last_assessment" and not is_after_baseline:
-            raise RefreshParseError(
-                "freshness mismatch in "
-                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
-                f"published_at {candidate.published_at!r} is not after baseline "
-                f"assessment {baseline['assessed_at']!r}, so freshness cannot be "
-                "new_after_last_assessment"
-            )
+        computed[candidate.ordinal] = (
+            "new_after_last_assessment"
+            if is_after_baseline
+            else "missed_baseline_evidence"
+        )
 
-        if candidate.freshness == "missed_baseline_evidence" and is_after_baseline:
-            raise RefreshParseError(
-                "freshness mismatch in "
-                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
-                f"published_at {candidate.published_at!r} is after baseline "
-                f"assessment {baseline['assessed_at']!r}, so freshness cannot be "
-                "missed_baseline_evidence"
-            )
+    return computed
 
 
 def validate_candidate_source_policy(parsed: Any) -> None:
@@ -467,6 +460,7 @@ def apply_success(
     transcript: str,
     transcript_sha256: str,
     parsed: Any,
+    computed_freshness: dict[int, str],
 ) -> None:
     source_run_key = run.source_run_key
     if source_run_key is None:
@@ -572,7 +566,7 @@ def apply_success(
                 candidate["summary"],
                 candidate["why_it_matters"],
                 candidate["duplicate_risk"],
-                candidate["freshness"],
+                computed_freshness[candidate["ordinal"]],
             ),
         )
 
@@ -722,7 +716,7 @@ def collect_one(
             expected_event_id=row["event_id"],
             expected_baseline_probability=row["baseline_probability"],
         )
-        validate_candidate_freshness(conn, row, parsed)
+        computed_freshness = compute_candidate_freshness(conn, row, parsed)
         validate_candidate_source_policy(parsed)
         validate_candidate_url_date_consistency(conn, row, parsed)
     except RefreshParseError as exc:
@@ -749,7 +743,15 @@ def collect_one(
 
     try:
         with conn:
-            apply_success(conn, row, run, transcript, transcript_sha256, parsed)
+            apply_success(
+                conn,
+                row,
+                run,
+                transcript,
+                transcript_sha256,
+                parsed,
+                computed_freshness,
+            )
             recompute_batch(conn, row["refresh_id"])
     except sqlite3.IntegrityError as exc:
         with conn:
