@@ -226,7 +226,13 @@ def write_run(state_dir: Path, *, status: str = "ok", summary: str = "", session
     )
 
 
-def write_session(state_dir: Path, text: str, *, nested: bool = False) -> None:
+def write_session(
+    state_dir: Path,
+    text: str,
+    *,
+    nested: bool = False,
+    filename: str = "session-a.jsonl",
+) -> Path:
     session_dir = state_dir / "agents" / "main" / "sessions"
     session_dir.mkdir(parents=True, exist_ok=True)
     if nested:
@@ -242,10 +248,12 @@ def write_session(state_dir: Path, text: str, *, nested: bool = False) -> None:
             "role": "assistant",
             "content": [{"type": "text", "text": text}],
         }
-    (session_dir / "session-a.jsonl").write_text(
+    path = session_dir / filename
+    path.write_text(
         json.dumps(row, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    return path
 
 
 def get_state(db: Path) -> tuple[sqlite3.Row, sqlite3.Row, list[sqlite3.Row]]:
@@ -303,6 +311,100 @@ def test_collect_no_evidence_transcript(tmp_path: Path) -> None:
     assert candidates == []
     assert batch["status"] == "completed"
     assert batch["no_change_count"] == 1
+
+
+def test_deleted_session_transcript_is_used_when_live_missing(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state, summary=POSITIVE_REPORT[:100])
+    write_session(
+        state,
+        POSITIVE_REPORT,
+        filename="session-a.jsonl.deleted.2026-09-08T19-56-58.366Z",
+    )
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "new_evidence"
+    assert result["recommended_probability"] == 30
+    assert result["transcript_raw"] == POSITIVE_REPORT.strip()
+    assert len(candidates) == 1
+    assert batch["status"] == "completed"
+
+
+def test_live_session_is_preferred_over_deleted_transcript(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state, summary=NO_EVIDENCE_REPORT[:100])
+    write_session(state, NO_EVIDENCE_REPORT)
+    write_session(
+        state,
+        POSITIVE_REPORT,
+        filename="session-a.jsonl.deleted.2026-09-08T19-56-58.366Z",
+    )
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["outcome"] == "no_new_evidence"
+    assert result["recommended_probability"] is None
+    assert candidates == []
+    assert batch["status"] == "completed"
+
+
+def test_newest_deleted_session_transcript_is_used(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state, summary=NO_EVIDENCE_REPORT[:100])
+    write_session(
+        state,
+        NO_EVIDENCE_REPORT,
+        filename="session-a.jsonl.deleted.2026-09-08T19-55-00.000Z",
+    )
+    write_session(
+        state,
+        POSITIVE_REPORT,
+        filename="session-a.jsonl.deleted.2026-09-08T19-56-58.366Z",
+    )
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["outcome"] == "new_evidence"
+    assert result["recommended_probability"] == 30
+    assert len(candidates) == 1
+    assert batch["status"] == "completed"
+
+
+def test_incomplete_summary_uses_deleted_full_transcript(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state, summary=POSITIVE_REPORT[:150])
+    write_session(
+        state,
+        POSITIVE_REPORT,
+        nested=True,
+        filename="session-a.jsonl.deleted.2026-09-08T19-56-58.366Z",
+    )
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "new_evidence"
+    assert result["recommended_probability"] == 30
+    assert len(candidates) == 1
+    assert batch["status"] == "completed"
 
 
 def test_complete_summary_fallback_when_session_missing(tmp_path: Path) -> None:
