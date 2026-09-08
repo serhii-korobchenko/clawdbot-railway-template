@@ -139,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not script.exists():
             print(f"PROROK refresh-all launcher is not available: {script}", file=sys.stderr)
             return 2
-        return run_plain_python(script, rest)
+        return run_plain_python(script, ["--trigger-source", "telegram", *rest])
     if subcommand in {"refresh", "dry-run", "refresh-dry-run"}:
         if not require_args(rest, "Missing event_id. Usage: /prorok refresh <event_id>"):
             return 2
