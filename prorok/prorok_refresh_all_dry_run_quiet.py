@@ -486,8 +486,14 @@ def main(argv: list[str]) -> int:
             print("   stderr:", file=sys.stderr)
             for line in proc.stderr.rstrip().splitlines():
                 print(f"   {line}", file=sys.stderr)
-        if proc.returncode != 0:
-            print(f"   result: failed rc={proc.returncode}")
+        if not args.no_schedule and not scheduled:
+            target_failed = True
+
+        if target_failed:
+            if proc.returncode != 0:
+                print(f"   result: failed rc={proc.returncode}")
+            else:
+                print("   result: failed (cron_id not recorded)")
         else:
             print("   result: ok")
 
@@ -524,9 +530,6 @@ def main(argv: list[str]) -> int:
         except OSError as exc:
             failures += 1
             print(f"   audit_log_error: {exc}", file=sys.stderr)
-
-        if not args.no_schedule and not scheduled:
-            target_failed = True
 
         if target_failed:
             failures += 1
