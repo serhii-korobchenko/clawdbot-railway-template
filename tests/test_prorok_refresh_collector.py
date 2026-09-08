@@ -415,7 +415,7 @@ def test_incomplete_summary_uses_deleted_full_transcript(tmp_path: Path) -> None
     assert batch["status"] == "completed"
 
 
-def test_freshness_rejects_old_candidate_marked_new(tmp_path: Path) -> None:
+def test_freshness_normalizes_old_candidate_marked_new(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     state = tmp_path / "state"
     make_v3_db(db)
@@ -429,13 +429,12 @@ def test_freshness_rejects_old_candidate_marked_new(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert result["outcome"] == "error"
-    assert "freshness mismatch" in result["parse_error"]
-    assert "new_after_last_assessment" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "new_evidence"
+    assert len(candidates) == 1
+    assert candidates[0]["freshness"] == "missed_baseline_evidence"
+    assert batch["status"] == "completed"
 
 
 def test_freshness_accepts_old_candidate_as_missed_baseline(tmp_path: Path) -> None:
@@ -463,7 +462,7 @@ def test_freshness_accepts_old_candidate_as_missed_baseline(tmp_path: Path) -> N
     assert batch["status"] == "completed"
 
 
-def test_freshness_rejects_new_candidate_marked_missed_baseline(tmp_path: Path) -> None:
+def test_freshness_normalizes_new_candidate_marked_missed_baseline(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     state = tmp_path / "state"
     make_v3_db(db)
@@ -477,15 +476,14 @@ def test_freshness_rejects_new_candidate_marked_missed_baseline(tmp_path: Path) 
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "freshness mismatch" in result["parse_error"]
-    assert "missed_baseline_evidence" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert len(candidates) == 1
+    assert candidates[0]["freshness"] == "new_after_last_assessment"
+    assert batch["status"] == "completed"
 
 
-def test_date_only_same_baseline_day_is_not_provably_new(tmp_path: Path) -> None:
+def test_date_only_same_baseline_day_is_missed_baseline(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     state = tmp_path / "state"
     make_v3_db(db)
@@ -499,9 +497,30 @@ def test_date_only_same_baseline_day_is_not_provably_new(tmp_path: Path) -> None
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert len(candidates) == 1
+    assert candidates[0]["freshness"] == "missed_baseline_evidence"
+    assert batch["status"] == "completed"
+
+
+def test_invalid_published_at_still_fails_safe(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "published_at: 2026-09-08",
+        "published_at: not-a-date",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
     assert counts == {"parse_failed": 1}
     assert result["job_state"] == "parse_failed"
-    assert "freshness mismatch" in result["parse_error"]
+    assert "must be an ISO-8601 date or datetime" in result["parse_error"]
     assert candidates == []
     assert batch["status"] == "failed"
 
