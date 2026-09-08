@@ -23,7 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
+try:
+    from .prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
+except ImportError:  # direct script execution from /app/prorok
+    from prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
 DEFAULT_STATE_DIR = "/data/.openclaw"
