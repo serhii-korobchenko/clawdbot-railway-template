@@ -77,7 +77,9 @@ def make_v3_db(path: Path) -> None:
         );
 
         CREATE TABLE assessments(
-            assessment_id INTEGER PRIMARY KEY
+            assessment_id INTEGER PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            assessed_at TEXT NOT NULL
         );
 
         CREATE TABLE runs(
@@ -179,6 +181,12 @@ def make_v3_db(path: Path) -> None:
         """
     )
     conn.execute("INSERT INTO events(event_id) VALUES('event_a')")
+    conn.execute(
+        """
+        INSERT INTO assessments(assessment_id, event_id, assessed_at)
+        VALUES(1, 'event_a', '2026-09-01T11:56:19Z')
+        """
+    )
     cur = conn.execute(
         """
         INSERT INTO refresh_runs(
@@ -192,10 +200,10 @@ def make_v3_db(path: Path) -> None:
     conn.execute(
         """
         INSERT INTO refresh_event_results(
-            refresh_id,event_id,event_title_snapshot,baseline_probability,
-            job_state,cron_id
+            refresh_id,event_id,event_title_snapshot,baseline_assessment_id,
+            baseline_probability,job_state,cron_id
         )
-        VALUES(?, 'event_a', 'Event A', 20, 'scheduled', 'cron-a')
+        VALUES(?, 'event_a', 'Event A', 1, 20, 'scheduled', 'cron-a')
         """,
         (refresh_id,),
     )
@@ -405,6 +413,97 @@ def test_incomplete_summary_uses_deleted_full_transcript(tmp_path: Path) -> None
     assert result["recommended_probability"] == 30
     assert len(candidates) == 1
     assert batch["status"] == "completed"
+
+
+def test_freshness_rejects_old_candidate_marked_new(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "published_at: 2026-09-08",
+        "published_at: 2026-08-30",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert result["job_state"] == "parse_failed"
+    assert result["outcome"] == "error"
+    assert "freshness mismatch" in result["parse_error"]
+    assert "new_after_last_assessment" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
+
+
+def test_freshness_accepts_old_candidate_as_missed_baseline(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = (
+        POSITIVE_REPORT
+        .replace("published_at: 2026-09-08", "published_at: 2026-08-30")
+        .replace(
+            "freshness: new_after_last_assessment",
+            "freshness: missed_baseline_evidence",
+        )
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert len(candidates) == 1
+    assert candidates[0]["freshness"] == "missed_baseline_evidence"
+    assert batch["status"] == "completed"
+
+
+def test_freshness_rejects_new_candidate_marked_missed_baseline(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "freshness: new_after_last_assessment",
+        "freshness: missed_baseline_evidence",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert result["job_state"] == "parse_failed"
+    assert "freshness mismatch" in result["parse_error"]
+    assert "missed_baseline_evidence" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
+
+
+def test_date_only_same_baseline_day_is_not_provably_new(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+    write_run(state)
+    report = POSITIVE_REPORT.replace(
+        "published_at: 2026-09-08",
+        "published_at: 2026-09-01",
+    )
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"parse_failed": 1}
+    assert result["job_state"] == "parse_failed"
+    assert "freshness mismatch" in result["parse_error"]
+    assert candidates == []
+    assert batch["status"] == "failed"
 
 
 def test_complete_summary_fallback_when_session_missing(tmp_path: Path) -> None:
