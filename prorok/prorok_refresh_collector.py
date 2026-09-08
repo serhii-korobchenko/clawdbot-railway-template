@@ -192,20 +192,35 @@ def extract_final_assistant_text(session_path: Path) -> str:
     return last_text
 
 
+def resolve_session_transcript_path(state_dir: Path, session_id: str) -> Path:
+    """Resolve a live or OpenClaw-retired isolated-session transcript.
+
+    OpenClaw may retire delete-after-run isolated sessions by renaming
+    <sessionId>.jsonl to <sessionId>.jsonl.deleted.<ISO timestamp>. Prefer the
+    live transcript when it still exists; otherwise use the newest retired
+    transcript. The timestamp suffix is ISO-formatted, so filename ordering is
+    chronological for files belonging to the same session id.
+    """
+    session_dir = state_dir / "agents" / "main" / "sessions"
+    live_path = session_dir / f"{session_id}.jsonl"
+    if live_path.exists():
+        return live_path
+
+    retired = sorted(session_dir.glob(f"{session_id}.jsonl.deleted.*"))
+    if retired:
+        return retired[-1]
+
+    raise FileNotFoundError(
+        f"session transcript missing: {live_path}; "
+        f"no retired transcript matching {session_id}.jsonl.deleted.*"
+    )
+
+
 def transcript_for_run(state_dir: Path, run: CronRun) -> tuple[str, str]:
     if not run.session_id:
         raise FileNotFoundError("cron run has no sessionId")
 
-    session_path = (
-        state_dir
-        / "agents"
-        / "main"
-        / "sessions"
-        / f"{run.session_id}.jsonl"
-    )
-    if not session_path.exists():
-        raise FileNotFoundError(f"session transcript missing: {session_path}")
-
+    session_path = resolve_session_transcript_path(state_dir, run.session_id)
     text = extract_final_assistant_text(session_path)
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return text, digest
