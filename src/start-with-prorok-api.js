@@ -2,6 +2,8 @@ import childProcess from "node:child_process";
 
 const apiHost = process.env.PROROK_API_HOST?.trim() || "0.0.0.0";
 const apiPort = process.env.PROROK_API_PORT?.trim() || "18880";
+const collectorInterval =
+  process.env.PROROK_REFRESH_COLLECTOR_INTERVAL_SECONDS?.trim() || "30";
 
 const children = new Set();
 let shuttingDown = false;
@@ -83,4 +85,14 @@ spawnManaged(
     "--no-access-log",
   ],
   "PROROK read-only API"
+);
+
+spawnManaged(
+  "python3",
+  [
+    "prorok/prorok_refresh_collector.py",
+    "--interval-seconds",
+    collectorInterval,
+  ],
+  "PROROK refresh collector"
 );
