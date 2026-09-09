@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const API_BASE = process.env.PROROK_API_BASE_URL || "http://127.0.0.1:18880";
@@ -6,6 +8,19 @@ const API_TOKEN = process.env.PROROK_API_TOKEN || "";
 const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
+const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
+const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
+const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
+const execFileAsync = promisify(execFile);
+const CUSTOM_PROBABILITY_VALUES = [
+  0, 5,
+  10, 15, 20,
+  25, 30, 35,
+  40, 45, 50,
+  55, 60, 65, 70, 75,
+  80, 85, 90,
+  95, 100,
+];
 
 function callbackValue(payload) {
   return `${CALLBACK_NAMESPACE}:${payload}`;
@@ -239,84 +254,228 @@ async function recommendationPresentation(eventId) {
   return { title: "🎯 Рекомендація", tone: "neutral", blocks };
 }
 
-async function decisionRoutePresentation(eventId, expectedResultId, action) {
+async function loadActionableRecommendation(eventId, expectedResultId) {
   const data = await apiGet(
     `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
   );
   const rec = data.recommendation;
-  const token = eventToken(eventId);
 
   if (!rec) {
-    return {
-      title: "PROROK · Рішення",
-      tone: "neutral",
-      blocks: [
-        textBlock("Рекомендація більше недоступна. Жодних змін не виконано."),
-        buttonsBlock([button("◀️ До події", `event:${token}`)]),
-      ],
-    };
+    return { rec: null, problem: "Рекомендація більше недоступна." };
   }
-
   if (String(rec.refresh_event_result_id) !== String(expectedResultId)) {
     return {
-      title: "PROROK · Рішення",
-      tone: "neutral",
-      blocks: [
-        textBlock(
-          [
-            "Ця кнопка належить до попередньої рекомендації.",
-            `Було: refresh_event_result_id #${expectedResultId}`,
-            `Зараз: refresh_event_result_id #${rec.refresh_event_result_id}`,
-            "Жодних змін не виконано.",
-          ].join("\n"),
-        ),
-        buttonsBlock([button("🎯 Відкрити актуальну рекомендацію", `recommendation:${token}`, "primary")]),
-      ],
+      rec,
+      problem: [
+        "Ця кнопка належить до попередньої рекомендації.",
+        `Було: refresh_event_result_id #${expectedResultId}`,
+        `Зараз: refresh_event_result_id #${rec.refresh_event_result_id}`,
+      ].join("\n"),
     };
   }
-
   if (!rec.actionable) {
     return {
-      title: "PROROK · Рішення",
+      rec,
+      problem: `Рекомендація зараз має статус: ${recommendationStatusLabel(rec.status)}.`,
+    };
+  }
+  return { rec, problem: null };
+}
+
+async function runDecisionCli(refreshEventResultId, decisionType, probability = null) {
+  const args = [
+    DECISION_CLI,
+    "--db",
+    PROROK_DB_PATH,
+    "apply",
+    String(refreshEventResultId),
+    "--decision",
+    decisionType,
+    "--source",
+    "telegram",
+  ];
+  if (probability !== null && probability !== undefined) {
+    args.push("--probability", String(probability));
+  }
+
+  return await execFileAsync(PYTHON_BIN, args, {
+    timeout: 20000,
+    maxBuffer: 64 * 1024,
+    env: process.env,
+  });
+}
+
+function decisionErrorText(error) {
+  const stderr = String(error?.stderr || "").trim();
+  const stdout = String(error?.stdout || "").trim();
+  const message = stderr || stdout || String(error?.message || error);
+  return shortText(message, 900);
+}
+
+async function appliedDecisionPresentation(eventId, expectedResultId, decisionType, probability = null) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Рішення не застосовано",
       tone: "neutral",
       blocks: [
-        textBlock(
-          [
-            `Рекомендація зараз має статус: ${recommendationStatusLabel(rec.status)}.`,
-            "Жодних змін не виконано.",
-          ].join("\n"),
-        ),
-        buttonsBlock([button("◀️ До рекомендації", `recommendation:${token}`)]),
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([
+          button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
+          button("◀️ До події", `event:${token}`),
+        ]),
       ],
     };
   }
 
-  let selection;
-  if (action === "accept") {
-    selection = `Прийняти рекомендацію: ${rec.recommended_probability}%`;
-  } else if (action === "keep") {
-    selection = `Залишити поточну оцінку: ${rec.current_probability}%`;
-  } else {
-    selection = "Встановити власну оцінку";
+  try {
+    await runDecisionCli(expectedResultId, decisionType, probability);
+  } catch (error) {
+    return {
+      title: "PROROK · Рішення не застосовано",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic decision CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Якщо стан змінився паралельно, відкрийте актуальну рекомендацію ще раз.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
+          button("◀️ До події", `event:${token}`),
+        ]),
+      ],
+    };
   }
 
+  const after = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const afterRec = after.recommendation;
+  const decision = afterRec?.decision || null;
+
   return {
-    title: "PROROK · Перевірка callback",
+    title: "✅ PROROK · Рішення збережено",
     tone: "neutral",
     blocks: [
       textBlock(
         [
-          `Обрано: ${selection}`,
-          `refresh_event_result_id: #${rec.refresh_event_result_id}`,
+          `refresh_event_result_id: #${expectedResultId}`,
+          decision ? `Рішення: ${decision.decision_type}` : `Рішення: ${decisionType}`,
+          `Обрана ймовірність: ${decision?.selected_probability ?? probability ?? rec.recommended_probability}%`,
+          `Official forecast: ${afterRec?.current_probability ?? "—"}%`,
+          decision?.assessment_id
+            ? `Новий assessment: #${decision.assessment_id}`
+            : "Новий assessment: не створювався",
+          decision?.decided_at ? `Зафіксовано: ${decision.decided_at}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      ),
+      buttonsBlock([
+        button("🎯 Переглянути рекомендацію", `recommendation:${token}`),
+        button("◀️ До події", `event:${token}`, "primary"),
+      ]),
+    ],
+  };
+}
+
+async function customProbabilityPresentation(eventId, expectedResultId) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Власна оцінка",
+      tone: "neutral",
+      blocks: [
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  const blocks = [
+    textBlock(
+      [
+        `Поточна оцінка: ${rec.current_probability}%`,
+        `Рекомендація: ${rec.recommended_probability}%`,
+        "",
+        "Оберіть власну оцінку. Після вибору буде окремий екран підтвердження.",
+      ].join("\n"),
+    ),
+  ];
+
+  for (let i = 0; i < CUSTOM_PROBABILITY_VALUES.length; i += 3) {
+    const row = CUSTOM_PROBABILITY_VALUES.slice(i, i + 3).map((value) => {
+      const prefix =
+        value === rec.recommended_probability ? "⭐ " :
+        value === rec.current_probability ? "• " :
+        "";
+      return button(
+        `${prefix}${value}%`,
+        `decision-custom-value:${token}:${expectedResultId}:${value}`,
+      );
+    });
+    blocks.push(buttonsBlock(row));
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До рекомендації", `recommendation:${token}`),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: "✏️ PROROK · Власна оцінка", tone: "neutral", blocks };
+}
+
+async function customProbabilityConfirmPresentation(eventId, expectedResultId, probability) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Підтвердження",
+      tone: "neutral",
+      blocks: [
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  if (!CUSTOM_PROBABILITY_VALUES.includes(probability)) {
+    throw new Error("Invalid PROROK custom probability value");
+  }
+
+  return {
+    title: "PROROK · Підтвердження",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Поточний official forecast: ${rec.current_probability}%`,
+          `Рекомендація системи: ${rec.recommended_probability}%`,
+          `Ваша оцінка: ${probability}%`,
           "",
-          "Callback розпізнано детерміновано.",
-          "На цьому етапі рішення НЕ записується в PROROK DB і official forecast НЕ змінюється.",
+          `Після підтвердження буде створено новий official assessment ${probability}%.`,
         ].join("\n"),
       ),
       buttonsBlock([
-        button("◀️ До рекомендації", `recommendation:${token}`),
-        button("🏠 Головне меню", "home"),
+        button(
+          `✅ Підтвердити ${probability}%`,
+          `decision-custom-apply:${token}:${expectedResultId}:${probability}`,
+          "success",
+        ),
+        button("◀️ Змінити", `decision-custom:${token}:${expectedResultId}`),
       ]),
+      buttonsBlock([button("❌ Скасувати", `recommendation:${token}`)]),
     ],
   };
 }
@@ -328,6 +487,26 @@ function parseDecisionRoute(payload, prefix) {
     throw new Error("Invalid PROROK decision callback payload");
   }
   return { token, resultId };
+}
+
+function parseCustomDecisionRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, resultId, rawProbability, ...extra] = raw.split(":");
+  if (
+    !token ||
+    !resultId ||
+    !rawProbability ||
+    extra.length ||
+    !/^\d+$/.test(resultId) ||
+    !/^\d+$/.test(rawProbability)
+  ) {
+    throw new Error("Invalid PROROK custom decision callback payload");
+  }
+  const probability = Number.parseInt(rawProbability, 10);
+  if (!CUSTOM_PROBABILITY_VALUES.includes(probability)) {
+    throw new Error("Unsupported PROROK custom probability value");
+  }
+  return { token, resultId, probability };
 }
 
 async function eventEvidencePresentation(eventId) {
@@ -502,17 +681,38 @@ async function renderPayload(payload) {
   if (payload.startsWith("decision-accept:")) {
     const { token, resultId } = parseDecisionRoute(payload, "decision-accept:");
     const eventId = await resolveEventId(token, { activeOnly: true });
-    return await decisionRoutePresentation(eventId, resultId, "accept");
+    return await appliedDecisionPresentation(eventId, resultId, "accept_recommendation");
+  }
+  if (payload.startsWith("decision-custom-value:")) {
+    const { token, resultId, probability } = parseCustomDecisionRoute(
+      payload,
+      "decision-custom-value:",
+    );
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await customProbabilityConfirmPresentation(eventId, resultId, probability);
+  }
+  if (payload.startsWith("decision-custom-apply:")) {
+    const { token, resultId, probability } = parseCustomDecisionRoute(
+      payload,
+      "decision-custom-apply:",
+    );
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await appliedDecisionPresentation(
+      eventId,
+      resultId,
+      "custom_probability",
+      probability,
+    );
   }
   if (payload.startsWith("decision-custom:")) {
     const { token, resultId } = parseDecisionRoute(payload, "decision-custom:");
     const eventId = await resolveEventId(token, { activeOnly: true });
-    return await decisionRoutePresentation(eventId, resultId, "custom");
+    return await customProbabilityPresentation(eventId, resultId);
   }
   if (payload.startsWith("decision-keep:")) {
     const { token, resultId } = parseDecisionRoute(payload, "decision-keep:");
     const eventId = await resolveEventId(token, { activeOnly: true });
-    return await decisionRoutePresentation(eventId, resultId, "keep");
+    return await appliedDecisionPresentation(eventId, resultId, "keep_current");
   }
   if (payload.startsWith("event-evidence:")) {
     const eventId = await resolveEventId(payload.slice("event-evidence:".length), { activeOnly: true });
