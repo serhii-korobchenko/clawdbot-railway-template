@@ -87,6 +87,40 @@ def db_path(tmp_path):
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE refresh_event_results (
+            refresh_event_result_id INTEGER PRIMARY KEY,
+            refresh_id INTEGER NOT NULL,
+            event_id TEXT,
+            event_title_snapshot TEXT NOT NULL,
+            baseline_assessment_id INTEGER,
+            baseline_probability INTEGER,
+            job_state TEXT NOT NULL,
+            outcome TEXT,
+            recommended_probability INTEGER,
+            recommended_band TEXT,
+            recommended_label TEXT,
+            recommendation_confidence TEXT,
+            recommendation_reason TEXT,
+            change_recommended INTEGER NOT NULL DEFAULT 0,
+            candidate_rejected_count INTEGER NOT NULL DEFAULT 0,
+            recommendation_valid INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE refresh_user_decisions (
+            decision_id INTEGER PRIMARY KEY,
+            refresh_event_result_id INTEGER NOT NULL UNIQUE,
+            event_id_snapshot TEXT NOT NULL,
+            decision_type TEXT NOT NULL,
+            baseline_assessment_id INTEGER,
+            baseline_probability INTEGER NOT NULL,
+            recommended_probability INTEGER,
+            selected_probability INTEGER NOT NULL,
+            assessment_id INTEGER,
+            decision_source TEXT NOT NULL,
+            decided_at TEXT NOT NULL
+        );
+
         CREATE VIEW latest_event_state AS
         SELECT
             e.event_id,
@@ -188,6 +222,47 @@ def db_path(tmp_path):
             1, 'active_event', 1, 11, 'indicator',
             'medium', 'Evidence summary', 80, 90,
             '2026-06-01T09:30:00Z'
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO refresh_event_results(
+            refresh_event_result_id,
+            refresh_id,
+            event_id,
+            event_title_snapshot,
+            baseline_assessment_id,
+            baseline_probability,
+            job_state,
+            outcome,
+            recommended_probability,
+            recommended_band,
+            recommended_label,
+            recommendation_confidence,
+            recommendation_reason,
+            change_recommended,
+            candidate_rejected_count,
+            recommendation_valid,
+            created_at
+        ) VALUES (
+            100,
+            50,
+            'active_event',
+            'Nuclear test event',
+            1,
+            35,
+            'completed',
+            'new_evidence',
+            45,
+            '40-50%',
+            'Реалістична можливість',
+            'medium',
+            'New evidence supports an increase.',
+            1,
+            0,
+            1,
+            '2026-06-02T12:00:00Z'
         )
         """
     )
