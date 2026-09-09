@@ -183,7 +183,7 @@ def test_migration_v4_preserves_history_and_marks_legacy_unvalidated(
         """
     ).fetchone()
     assert result["candidate_rejected_count"] == 0
-    assert result["recommendation_valid"] == 1
+    assert result["recommendation_valid"] == 0
 
     assert migration.validate(conn) == []
 
