@@ -148,6 +148,7 @@ async function eventPresentation(eventId) {
         ].join("\n"),
       ),
       buttonsBlock([
+        button("🎯 Рекомендація", `recommendation:${token}`, "primary"),
         button("🧾 Evidence", `event-evidence:${token}`),
         button("📈 Історія", `event-history:${token}`),
       ]),
@@ -157,6 +158,176 @@ async function eventPresentation(eventId) {
       ]),
     ],
   };
+}
+
+
+function recommendationStatusLabel(status) {
+  if (status === "actionable") return "потребує рішення";
+  if (status === "decided") return "рішення вже зафіксовано";
+  if (status === "stale") return "застаріла";
+  if (status === "no_change") return "зміна не рекомендована";
+  return String(status || "невідомо");
+}
+
+async function recommendationPresentation(eventId) {
+  const data = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const rec = data.recommendation;
+  const token = eventToken(eventId);
+  const blocks = [];
+
+  if (!rec) {
+    blocks.push(textBlock("Для цієї події валідної рекомендації поки немає."));
+  } else {
+    const decision = rec.decision;
+    blocks.push(
+      textBlock(
+        [
+          `Поточна оцінка: ${rec.current_probability ?? "—"}%`,
+          `Рекомендація: ${rec.recommended_probability}%`,
+          `Baseline: ${rec.baseline_probability}% · assessment #${rec.baseline_assessment_id}`,
+          `Confidence рекомендації: ${rec.recommendation_confidence || "—"}`,
+          `Статус: ${recommendationStatusLabel(rec.status)}`,
+          rec.recommendation_reason
+            ? `Причина: ${shortText(rec.recommendation_reason, 700)}`
+            : null,
+          decision
+            ? `Рішення: ${decision.decision_type} → ${decision.selected_probability}% · ${decision.decided_at}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      ),
+    );
+
+    if (rec.actionable) {
+      const resultId = rec.refresh_event_result_id;
+      blocks.push(
+        buttonsBlock([
+          button(
+            `✅ Прийняти ${rec.recommended_probability}%`,
+            `decision-accept:${token}:${resultId}`,
+            "success",
+          ),
+          button(
+            "✏️ Власна оцінка",
+            `decision-custom:${token}:${resultId}`,
+            "primary",
+          ),
+          button(
+            `➖ Залишити ${rec.current_probability ?? rec.baseline_probability}%`,
+            `decision-keep:${token}:${resultId}`,
+          ),
+        ]),
+      );
+    } else if (rec.is_stale) {
+      blocks.push(
+        textBlock(
+          "Ця рекомендація більше не може бути застосована: поточний official assessment вже відрізняється від baseline.",
+        ),
+      );
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До події", `event:${token}`),
+      button("📊 До прогнозів", "events"),
+    ]),
+  );
+  return { title: "🎯 Рекомендація", tone: "neutral", blocks };
+}
+
+async function decisionRoutePresentation(eventId, expectedResultId, action) {
+  const data = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const rec = data.recommendation;
+  const token = eventToken(eventId);
+
+  if (!rec) {
+    return {
+      title: "PROROK · Рішення",
+      tone: "neutral",
+      blocks: [
+        textBlock("Рекомендація більше недоступна. Жодних змін не виконано."),
+        buttonsBlock([button("◀️ До події", `event:${token}`)]),
+      ],
+    };
+  }
+
+  if (String(rec.refresh_event_result_id) !== String(expectedResultId)) {
+    return {
+      title: "PROROK · Рішення",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Ця кнопка належить до попередньої рекомендації.",
+            `Було: refresh_event_result_id #${expectedResultId}`,
+            `Зараз: refresh_event_result_id #${rec.refresh_event_result_id}`,
+            "Жодних змін не виконано.",
+          ].join("\n"),
+        ),
+        buttonsBlock([button("🎯 Відкрити актуальну рекомендацію", `recommendation:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  if (!rec.actionable) {
+    return {
+      title: "PROROK · Рішення",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Рекомендація зараз має статус: ${recommendationStatusLabel(rec.status)}.`,
+            "Жодних змін не виконано.",
+          ].join("\n"),
+        ),
+        buttonsBlock([button("◀️ До рекомендації", `recommendation:${token}`)]),
+      ],
+    };
+  }
+
+  let selection;
+  if (action === "accept") {
+    selection = `Прийняти рекомендацію: ${rec.recommended_probability}%`;
+  } else if (action === "keep") {
+    selection = `Залишити поточну оцінку: ${rec.current_probability}%`;
+  } else {
+    selection = "Встановити власну оцінку";
+  }
+
+  return {
+    title: "PROROK · Перевірка callback",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Обрано: ${selection}`,
+          `refresh_event_result_id: #${rec.refresh_event_result_id}`,
+          "",
+          "Callback розпізнано детерміновано.",
+          "На цьому етапі рішення НЕ записується в PROROK DB і official forecast НЕ змінюється.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button("◀️ До рекомендації", `recommendation:${token}`),
+        button("🏠 Головне меню", "home"),
+      ]),
+    ],
+  };
+}
+
+function parseDecisionRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, resultId, ...extra] = raw.split(":");
+  if (!token || !resultId || extra.length || !/^\\d+$/.test(resultId)) {
+    throw new Error("Invalid PROROK decision callback payload");
+  }
+  return { token, resultId };
 }
 
 async function eventEvidencePresentation(eventId) {
@@ -323,6 +494,25 @@ async function renderPayload(payload) {
     const [, filter = "all", rawPage = "0"] = payload.split(":");
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
     return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
+  }
+  if (payload.startsWith("recommendation:")) {
+    const eventId = await resolveEventId(payload.slice("recommendation:".length), { activeOnly: true });
+    return await recommendationPresentation(eventId);
+  }
+  if (payload.startsWith("decision-accept:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-accept:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await decisionRoutePresentation(eventId, resultId, "accept");
+  }
+  if (payload.startsWith("decision-custom:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-custom:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await decisionRoutePresentation(eventId, resultId, "custom");
+  }
+  if (payload.startsWith("decision-keep:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-keep:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await decisionRoutePresentation(eventId, resultId, "keep");
   }
   if (payload.startsWith("event-evidence:")) {
     const eventId = await resolveEventId(payload.slice("event-evidence:".length), { activeOnly: true });
