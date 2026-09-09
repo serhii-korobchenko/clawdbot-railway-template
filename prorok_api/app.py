@@ -11,8 +11,12 @@ from .auth import require_api_token
 from .config import ApiSettings
 from .db import readonly_connection, validate_database
 from .errors import DatabaseUnavailable
-from .models import EventDetailResponse, EventListResponse
-from .repository import get_event_detail, list_events
+from .models import (
+    EventDetailResponse,
+    EventListResponse,
+    LatestRecommendationResponse,
+)
+from .repository import get_event_detail, get_latest_recommendation, list_events
 
 
 EventStatusQuery = Literal["active", "paused", "resolved", "archived"]
@@ -59,6 +63,20 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     ):
         with readonly_connection(resolved_settings.db_path) as conn:
             return list_events(conn, status=status, q=q)
+
+    @app.get(
+        "/api/v1/events/{event_id}/latest-recommendation",
+        response_model=LatestRecommendationResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def event_latest_recommendation(event_id: str):
+        with readonly_connection(resolved_settings.db_path) as conn:
+            result = get_latest_recommendation(conn, event_id)
+
+        if result is None:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        return result
 
     @app.get(
         "/api/v1/events/{event_id}",
