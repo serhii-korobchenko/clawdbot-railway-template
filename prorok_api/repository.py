@@ -366,7 +366,7 @@ def get_latest_recommendation(
     current_assessment_id = row["current_assessment_id"]
     current_probability = row["current_probability"]
 
-    is_stale = (
+    baseline_is_stale = (
         current_assessment_id is None
         or current_probability is None
         or int(current_assessment_id) != baseline_assessment_id
@@ -383,6 +383,11 @@ def get_latest_recommendation(
             "decision_source": row["decision_source"],
             "decided_at": row["decided_at"],
         }
+
+    # Once a final decision exists, the recommendation is historical and no
+    # longer "stale" in the actionability sense. Accept/custom decisions
+    # intentionally create a newer assessment than the refresh baseline.
+    is_stale = baseline_is_stale if decision is None else False
 
     change_recommended = bool(row["change_recommended"])
     actionable = decision is None and not is_stale and change_recommended

@@ -72,12 +72,81 @@ def test_latest_recommendation_becomes_decided(
 
     rec = response.json()["recommendation"]
     assert rec["status"] == "decided"
+    assert rec["is_stale"] is False
     assert rec["actionable"] is False
     assert rec["decision"]["decision_id"] == 7
     assert rec["decision"]["decision_type"] == "keep_current"
     assert rec["decision"]["selected_probability"] == 35
     assert rec["decision"]["assessment_id"] is None
 
+
+
+def test_accepted_recommendation_is_decided_not_stale(
+    client,
+    auth_headers,
+    db_path,
+):
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO assessments(
+            assessment_id, event_id, run_id, assessed_at,
+            probability_percent, probability_band, probability_label,
+            confidence, delta_from_previous, rationale
+        ) VALUES (
+            2, 'active_event', 12, '2026-06-02T13:00:00Z',
+            45, '40-50%', 'Реалістична можливість',
+            'medium', 10, 'Accepted refresh recommendation.'
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO refresh_user_decisions(
+            decision_id,
+            refresh_event_result_id,
+            event_id_snapshot,
+            decision_type,
+            baseline_assessment_id,
+            baseline_probability,
+            recommended_probability,
+            selected_probability,
+            assessment_id,
+            decision_source,
+            decided_at
+        ) VALUES (
+            8,
+            100,
+            'active_event',
+            'accept_recommendation',
+            1,
+            35,
+            45,
+            45,
+            2,
+            'telegram',
+            '2026-06-02T13:00:00Z'
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(
+        "/api/v1/events/active_event/latest-recommendation",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    rec = response.json()["recommendation"]
+    assert rec["status"] == "decided"
+    assert rec["is_stale"] is False
+    assert rec["actionable"] is False
+    assert rec["current_assessment_id"] == 2
+    assert rec["current_probability"] == 45
+    assert rec["decision"]["decision_type"] == "accept_recommendation"
+    assert rec["decision"]["selected_probability"] == 45
+    assert rec["decision"]["assessment_id"] == 2
 
 def test_latest_recommendation_detects_stale_baseline(
     client,
