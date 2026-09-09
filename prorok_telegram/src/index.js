@@ -324,7 +324,7 @@ async function decisionRoutePresentation(eventId, expectedResultId, action) {
 function parseDecisionRoute(payload, prefix) {
   const raw = payload.slice(prefix.length);
   const [token, resultId, ...extra] = raw.split(":");
-  if (!token || !resultId || extra.length || !/^\\d+$/.test(resultId)) {
+  if (!token || !resultId || extra.length || !/^\d+$/.test(resultId)) {
     throw new Error("Invalid PROROK decision callback payload");
   }
   return { token, resultId };
