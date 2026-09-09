@@ -156,6 +156,8 @@ def make_v3_db(path: Path) -> None:
             change_recommended INTEGER NOT NULL DEFAULT 0,
             recommendation_reason TEXT,
             summary TEXT,
+            candidate_rejected_count INTEGER NOT NULL DEFAULT 0,
+            recommendation_valid INTEGER NOT NULL DEFAULT 1,
             created_at TEXT
         );
 
@@ -175,6 +177,8 @@ def make_v3_db(path: Path) -> None:
             why_it_matters TEXT,
             duplicate_risk TEXT,
             freshness TEXT,
+            validation_state TEXT NOT NULL DEFAULT 'legacy_unvalidated',
+            rejection_reason TEXT,
             created_at TEXT,
             UNIQUE(refresh_event_result_id, ordinal)
         );
@@ -524,11 +528,16 @@ def test_invalid_published_at_still_fails_safe(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "must be an ISO-8601 date or datetime" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "no_new_evidence"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_invalid_metadata"
+    assert "must be an ISO-8601 date or datetime" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_source_policy_rejects_banned_domain(tmp_path: Path) -> None:
@@ -545,12 +554,15 @@ def test_source_policy_rejects_banned_domain(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "source policy violation" in result["parse_error"]
-    assert "facebook.com" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_source_policy"
+    assert "facebook.com" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_source_policy_rejects_banned_subdomain(tmp_path: Path) -> None:
@@ -567,11 +579,14 @@ def test_source_policy_rejects_banned_subdomain(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert "source policy violation" in result["parse_error"]
-    assert "youtube.com" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_source_policy"
+    assert "youtube.com" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> None:
@@ -627,12 +642,15 @@ def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> 
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "published_at conflict" in result["parse_error"]
-    assert "2026-09-05" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_date_conflict"
+    assert "2026-09-05" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_url_date_consistency_accepts_same_calendar_date(tmp_path: Path) -> None:
@@ -686,9 +704,60 @@ def test_url_date_consistency_accepts_same_calendar_date(tmp_path: Path) -> None
 
     assert counts == {"completed": 1}
     assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 0
+    assert result["recommendation_valid"] == 1
     assert len(candidates) == 1
     assert candidates[0]["published_at"] == "2026-09-08"
+    assert candidates[0]["validation_state"] == "accepted"
     assert batch["status"] == "completed"
+
+
+def test_mixed_candidates_quarantine_invalidates_recommendation(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+
+    report = POSITIVE_REPORT.replace(
+        "ASSESSMENT_RECOMMENDATION:",
+        """2.
+direction: counterindicator
+strength: medium
+relevance: 80
+credibility: 80
+title: Banned source
+source: Facebook
+url: https://www.facebook.com/example/post/123
+published_at: 2026-09-09
+summary: Другий факт.
+why_it_matters: Впливає на оцінку.
+duplicate_risk: low
+freshness: new_after_last_assessment
+
+ASSESSMENT_RECOMMENDATION:""",
+    )
+
+    write_run(state)
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "new_evidence"
+    assert result["new_evidence_count"] == 1
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert result["recommended_band"] is None
+    assert result["change_recommended"] == 0
+    assert len(candidates) == 2
+    assert candidates[0]["validation_state"] == "accepted"
+    assert candidates[1]["validation_state"] == "rejected_source_policy"
+    assert batch["status"] == "completed"
+    assert batch["events_checked"] == 1
+    assert batch["new_evidence_count"] == 1
+    assert batch["recommendations_count"] == 0
 
 
 def test_complete_summary_fallback_when_session_missing(tmp_path: Path) -> None:
