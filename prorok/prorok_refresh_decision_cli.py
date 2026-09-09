@@ -350,21 +350,26 @@ def cmd_apply(args: argparse.Namespace) -> int:
             if event_id is None:
                 raise CliError("refresh result is detached from an event")
 
-            current = current_assessment(conn, str(event_id))
-            validate_refresh_is_actionable(refresh, current)
-            assert current is not None
-
-            selected_probability = resolve_selected_probability(args, refresh, current)
-
-            # Enforce the existing PROROK probability scale without inventing
-            # labels for the intentional gaps between defined ranges.
-            band, label = map_probability(selected_probability)
-
             existing = load_existing_decision(conn, args.refresh_event_result_id)
             if existing is not None:
+                if args.decision == DECISION_CUSTOM:
+                    if args.probability is None:
+                        raise CliError("--probability is required with custom_probability")
+                    requested_probability = int(args.probability)
+                elif args.decision == DECISION_ACCEPT:
+                    if args.probability is not None:
+                        raise CliError("--probability is only allowed with custom_probability")
+                    if refresh["recommended_probability"] is None:
+                        raise CliError("refresh result has no recommended_probability")
+                    requested_probability = int(refresh["recommended_probability"])
+                else:
+                    if args.probability is not None:
+                        raise CliError("--probability is not allowed with keep_current")
+                    requested_probability = int(existing["selected_probability"])
+
                 same_request = (
                     existing["decision_type"] == args.decision
-                    and int(existing["selected_probability"]) == selected_probability
+                    and int(existing["selected_probability"]) == requested_probability
                 )
                 if not same_request:
                     raise CliError(
@@ -376,6 +381,16 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 conn.rollback()
                 print_existing_decision(existing)
                 return 0
+
+            current = current_assessment(conn, str(event_id))
+            validate_refresh_is_actionable(refresh, current)
+            assert current is not None
+
+            selected_probability = resolve_selected_probability(args, refresh, current)
+
+            # Enforce the existing PROROK probability scale without inventing
+            # labels for the intentional gaps between defined ranges.
+            band, label = map_probability(selected_probability)
 
             assessment_id: int | None = None
 
