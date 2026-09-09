@@ -296,3 +296,128 @@ def get_event_detail(
             "assessment_evidence_attribution": "unavailable",
         },
     }
+
+
+def get_latest_recommendation(
+    conn: sqlite3.Connection,
+    event_id: str,
+) -> dict[str, Any] | None:
+    event = conn.execute(
+        "SELECT event_id FROM events WHERE event_id = ?",
+        (event_id,),
+    ).fetchone()
+    if event is None:
+        return None
+
+    row = conn.execute(
+        """
+        SELECT
+            rer.refresh_event_result_id,
+            rer.refresh_id,
+            rer.created_at,
+            rer.outcome,
+            rer.baseline_assessment_id,
+            rer.baseline_probability,
+            rer.recommended_probability,
+            rer.recommended_band,
+            rer.recommended_label,
+            rer.recommendation_confidence,
+            rer.recommendation_reason,
+            rer.change_recommended,
+            rer.candidate_rejected_count,
+            rer.recommendation_valid,
+            current.assessment_id AS current_assessment_id,
+            current.probability_percent AS current_probability,
+            d.decision_id,
+            d.decision_type,
+            d.selected_probability,
+            d.assessment_id AS decision_assessment_id,
+            d.decision_source,
+            d.decided_at
+        FROM refresh_event_results rer
+        LEFT JOIN assessments current
+          ON current.assessment_id = (
+              SELECT a.assessment_id
+              FROM assessments a
+              WHERE a.event_id = rer.event_id
+              ORDER BY a.assessed_at DESC, a.assessment_id DESC
+              LIMIT 1
+          )
+        LEFT JOIN refresh_user_decisions d
+          ON d.refresh_event_result_id = rer.refresh_event_result_id
+        WHERE rer.event_id = ?
+          AND rer.job_state = 'completed'
+          AND rer.recommendation_valid = 1
+          AND rer.recommended_probability IS NOT NULL
+        ORDER BY rer.created_at DESC, rer.refresh_event_result_id DESC
+        LIMIT 1
+        """,
+        (event_id,),
+    ).fetchone()
+
+    if row is None:
+        return {
+            "event_id": event_id,
+            "recommendation": None,
+        }
+
+    baseline_assessment_id = int(row["baseline_assessment_id"])
+    baseline_probability = int(row["baseline_probability"])
+    current_assessment_id = row["current_assessment_id"]
+    current_probability = row["current_probability"]
+
+    is_stale = (
+        current_assessment_id is None
+        or current_probability is None
+        or int(current_assessment_id) != baseline_assessment_id
+        or int(current_probability) != baseline_probability
+    )
+
+    decision = None
+    if row["decision_id"] is not None:
+        decision = {
+            "decision_id": row["decision_id"],
+            "decision_type": row["decision_type"],
+            "selected_probability": row["selected_probability"],
+            "assessment_id": row["decision_assessment_id"],
+            "decision_source": row["decision_source"],
+            "decided_at": row["decided_at"],
+        }
+
+    change_recommended = bool(row["change_recommended"])
+    actionable = decision is None and not is_stale and change_recommended
+
+    if decision is not None:
+        status = "decided"
+    elif is_stale:
+        status = "stale"
+    elif change_recommended:
+        status = "actionable"
+    else:
+        status = "no_change"
+
+    return {
+        "event_id": event_id,
+        "recommendation": {
+            "refresh_event_result_id": row["refresh_event_result_id"],
+            "refresh_id": row["refresh_id"],
+            "created_at": row["created_at"],
+            "outcome": row["outcome"],
+            "baseline_assessment_id": baseline_assessment_id,
+            "baseline_probability": baseline_probability,
+            "recommended_probability": int(row["recommended_probability"]),
+            "recommended_band": row["recommended_band"],
+            "recommended_label": row["recommended_label"],
+            "recommendation_confidence": row["recommendation_confidence"],
+            "recommendation_reason": row["recommendation_reason"],
+            "change_recommended": change_recommended,
+            "candidate_rejected_count": int(row["candidate_rejected_count"] or 0),
+            "recommendation_valid": bool(row["recommendation_valid"]),
+            "current_assessment_id": current_assessment_id,
+            "current_probability": current_probability,
+            "is_stale": is_stale,
+            "actionable": actionable,
+            "status": status,
+            "decision": decision,
+        },
+    }
