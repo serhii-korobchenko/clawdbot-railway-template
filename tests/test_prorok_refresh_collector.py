@@ -270,7 +270,13 @@ def get_state(db: Path) -> tuple[sqlite3.Row, sqlite3.Row, list[sqlite3.Row]]:
     result = conn.execute("SELECT * FROM refresh_event_results").fetchone()
     batch = conn.execute("SELECT * FROM refresh_runs").fetchone()
     candidates = conn.execute(
-        "SELECT * FROM refresh_candidate_evidence ORDER BY ordinal"
+        """
+        SELECT *
+        FROM refresh_candidate_evidence
+        WHERE refresh_event_result_id = ?
+        ORDER BY ordinal
+        """,
+        (result["refresh_event_result_id"],),
     ).fetchall()
     conn.close()
     return result, batch, candidates
