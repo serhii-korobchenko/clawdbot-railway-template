@@ -91,6 +91,31 @@ def apply_migration(conn: sqlite3.Connection) -> None:
     add_columns(conn, "refresh_event_results", RESULT_COLUMNS)
     conn.executescript(INDEX_SQL)
 
+    # Historical candidate rows predate deterministic quarantine state. Preserve
+    # them as legacy_unvalidated and conservatively invalidate any historical
+    # recommendation that depended on such candidates. Completed no-evidence
+    # rows without candidates remain recommendation_valid = 1.
+    conn.execute(
+        """
+        UPDATE refresh_event_results
+        SET recommendation_valid = 0
+        WHERE EXISTS (
+            SELECT 1
+            FROM refresh_candidate_evidence c
+            WHERE c.refresh_event_result_id =
+                  refresh_event_results.refresh_event_result_id
+              AND c.validation_state = 'legacy_unvalidated'
+        )
+        """
+    )
+    conn.execute(
+        """
+        UPDATE refresh_event_results
+        SET recommendation_valid = 0
+        WHERE job_state != 'completed'
+        """
+    )
+
     conn.execute(
         """
         INSERT INTO meta(key, value)
