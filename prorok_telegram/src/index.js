@@ -9,6 +9,7 @@ const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
+const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const execFileAsync = promisify(execFile);
@@ -114,6 +115,23 @@ function evidenceDirectionLabel(direction) {
   return "⚪ neutral";
 }
 
+function telegramActorSnapshot(ctx) {
+  const raw =
+    ctx?.callback?.senderId ??
+    ctx?.callback?.sender_id ??
+    ctx?.callback?.from?.id ??
+    ctx?.auth?.senderId ??
+    ctx?.auth?.sender_id ??
+    ctx?.senderId ??
+    ctx?.sender_id ??
+    ctx?.from?.id ??
+    null;
+  if (raw === null || raw === undefined || String(raw).trim() === "") {
+    return "telegram:authorized";
+  }
+  return `telegram:${shortText(String(raw), 120)}`;
+}
+
 async function eventsPresentation() {
   const items = await activeEvents();
   const blocks = [textBlock(`Активні прогнози: ${items.length}`)];
@@ -168,13 +186,15 @@ async function eventPresentation(eventId) {
         button("📈 Історія", `event-history:${token}`),
       ]),
       buttonsBlock([
+        button("🗑 Видалити подію", `delete-event:${token}`, "danger"),
+      ]),
+      buttonsBlock([
         button("◀️ До прогнозів", "events"),
         button("🏠 Головне меню", "home"),
       ]),
     ],
   };
 }
-
 
 function recommendationStatusLabel(status) {
   if (status === "actionable") return "потребує рішення";
@@ -509,6 +529,254 @@ function parseCustomDecisionRoute(payload, prefix) {
   return { token, resultId, probability };
 }
 
+function parseEvidenceDeleteRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, rawEvidenceId, ...extra] = raw.split(":");
+  if (!token || !rawEvidenceId || extra.length || !/^\d+$/.test(rawEvidenceId)) {
+    throw new Error("Invalid PROROK evidence delete callback payload");
+  }
+  return { token, evidenceId: Number.parseInt(rawEvidenceId, 10) };
+}
+
+function parseCliKeyValues(stdout) {
+  const result = {};
+  for (const rawLine of String(stdout || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const index = line.indexOf(":");
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    const value = line.slice(index + 1).trim();
+    if (key) result[key] = value;
+  }
+  return result;
+}
+
+async function runDeleteCli(command, targetId, actorSnapshot) {
+  return await execFileAsync(
+    PYTHON_BIN,
+    [
+      DELETE_CLI,
+      "--db",
+      PROROK_DB_PATH,
+      command,
+      String(targetId),
+      "--source",
+      "telegram",
+      "--actor",
+      actorSnapshot,
+    ],
+    {
+      timeout: 20000,
+      maxBuffer: 64 * 1024,
+      env: process.env,
+    },
+  );
+}
+
+async function loadEvidenceForDeletion(eventId, evidenceId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+  const item = evidence.find((candidate) => Number(candidate.evidence_id) === Number(evidenceId)) || null;
+  return { data, event, item };
+}
+
+async function eventDeleteConfirmationPresentation(eventId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const token = eventToken(event.event_id);
+  const assessmentCount = Array.isArray(data.assessments) ? data.assessments.length : 0;
+  const evidenceCount = Array.isArray(data.evidence) ? data.evidence.length : 0;
+
+  return {
+    title: "⚠️ PROROK · Видалення події",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Подія: ${event.title}`,
+          `event_id: ${event.event_id}`,
+          `Assessment буде видалено: ${assessmentCount}`,
+          `Evidence буде видалено: ${evidenceCount}`,
+          "",
+          "Це hard delete. Refresh/decision audit history зберігається за правилами schema v6, а сам факт видалення буде записано у deletion_audit.",
+          "Натискання кнопки нижче одразу змінить production DB.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button("✅ Підтвердити видалення", `delete-event-apply:${token}`, "danger"),
+        button("❌ Скасувати", `event-any:${token}`),
+      ]),
+    ],
+  };
+}
+
+async function evidenceDeleteConfirmationPresentation(eventId, evidenceId) {
+  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const token = eventToken(event.event_id);
+
+  if (!item) {
+    return {
+      title: "PROROK · Evidence недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock(`Evidence #${evidenceId} більше не існує в цій події. Жодних змін не виконано.`),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${token}`),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  }
+
+  const source = item.source || {};
+  const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
+
+  return {
+    title: "⚠️ PROROK · Видалення evidence",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Evidence #${item.evidence_id}`,
+          `Подія: ${event.title}`,
+          `Напрям: ${item.direction}${item.strength ? ` · ${item.strength}` : ""}`,
+          `Summary: ${shortText(item.summary, 500)}`,
+          `Джерело: ${shortText(sourceLabel, 180)}`,
+          "",
+          "Буде видалено тільки цей evidence. Source збережеться. Факт видалення буде записано у deletion_audit.",
+          "Натискання кнопки нижче одразу змінить production DB.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button(
+          `✅ Видалити evidence #${item.evidence_id}`,
+          `delete-evidence-apply:${token}:${item.evidence_id}`,
+          "danger",
+        ),
+        button("❌ Скасувати", `event-any:${token}`),
+      ]),
+    ],
+  };
+}
+
+async function appliedEventDeletePresentation(eventId, ctx) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const assessmentCount = Array.isArray(data.assessments) ? data.assessments.length : 0;
+  const evidenceCount = Array.isArray(data.evidence) ? data.evidence.length : 0;
+  const actor = telegramActorSnapshot(ctx);
+
+  try {
+    const { stdout } = await runDeleteCli("delete-event", eventId, actor);
+    const fields = parseCliKeyValues(stdout);
+    return {
+      title: "✅ PROROK · Подію видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Подія: ${event.title}`,
+            `event_id: ${eventId}`,
+            `deletion_id: ${fields.deletion_id || "—"}`,
+            `Assessment видалено: ${fields.assessment_count_deleted || assessmentCount}`,
+            `Evidence видалено: ${fields.evidence_count_deleted || evidenceCount}`,
+            `Sources збережено: ${fields.source_rows_preserved || "—"}`,
+            `Actor: ${fields.actor_snapshot || actor}`,
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("📊 До прогнозів", "events", "primary"),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Подію не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic delete CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Жоден частковий delete не повинен бути committed: CLI працює в одній SQLite transaction.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${eventToken(eventId)}`),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  }
+}
+
+async function appliedEvidenceDeletePresentation(eventId, evidenceId, ctx) {
+  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const token = eventToken(eventId);
+
+  if (!item) {
+    return {
+      title: "PROROK · Evidence не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(`Evidence #${evidenceId} більше не існує. Жодних змін не виконано.`),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+
+  const actor = telegramActorSnapshot(ctx);
+
+  try {
+    const { stdout } = await runDeleteCli("delete-evidence", evidenceId, actor);
+    const fields = parseCliKeyValues(stdout);
+    return {
+      title: "✅ PROROK · Evidence видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Evidence #${evidenceId}`,
+            `Подія: ${event.title}`,
+            `deletion_id: ${fields.deletion_id || "—"}`,
+            `Source збережено: #${fields.source_id_preserved || item.source?.source_id || "—"}`,
+            `Actor: ${fields.actor_snapshot || actor}`,
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`, "primary"),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Evidence не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic delete CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Жоден частковий delete не повинен бути committed: CLI працює в одній SQLite transaction.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+}
+
 async function eventEvidencePresentation(eventId) {
   const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
   const event = data.event;
@@ -532,6 +800,11 @@ async function eventEvidencePresentation(eventId) {
             `Relevance: ${item.relevance ?? "—"} · Credibility: ${item.credibility ?? "—"}`,
           ].join("\n"),
         ),
+      );
+      blocks.push(
+        buttonsBlock([
+          button(`🗑 Видалити evidence #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
+        ]),
       );
     }
     if (evidence.length > 10) blocks.push(textBlock(`Показано 10 з ${evidence.length} evidence.`));
@@ -642,7 +915,12 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
           ].join("\n"),
         ),
       );
-      blocks.push(buttonsBlock([button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`)]));
+      blocks.push(
+        buttonsBlock([
+          button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`),
+          button(`🗑 #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
+        ]),
+      );
     }
   }
 
@@ -666,13 +944,35 @@ function placeholderPresentation(title) {
   };
 }
 
-async function renderPayload(payload) {
+async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
   if (payload.startsWith("evidence:")) {
     const [, filter = "all", rawPage = "0"] = payload.split(":");
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
     return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
+  }
+  if (payload.startsWith("delete-event-apply:")) {
+    const token = payload.slice("delete-event-apply:".length);
+    if (!token || token.includes(":")) throw new Error("Invalid PROROK event delete callback payload");
+    const eventId = await resolveEventId(token);
+    return await appliedEventDeletePresentation(eventId, ctx);
+  }
+  if (payload.startsWith("delete-event:")) {
+    const token = payload.slice("delete-event:".length);
+    if (!token || token.includes(":")) throw new Error("Invalid PROROK event delete callback payload");
+    const eventId = await resolveEventId(token);
+    return await eventDeleteConfirmationPresentation(eventId);
+  }
+  if (payload.startsWith("delete-evidence-apply:")) {
+    const { token, evidenceId } = parseEvidenceDeleteRoute(payload, "delete-evidence-apply:");
+    const eventId = await resolveEventId(token);
+    return await appliedEvidenceDeletePresentation(eventId, evidenceId, ctx);
+  }
+  if (payload.startsWith("delete-evidence:")) {
+    const { token, evidenceId } = parseEvidenceDeleteRoute(payload, "delete-evidence:");
+    const eventId = await resolveEventId(token);
+    return await evidenceDeleteConfirmationPresentation(eventId, evidenceId);
   }
   if (payload.startsWith("recommendation:")) {
     const eventId = await resolveEventId(payload.slice("recommendation:".length), { activeOnly: true });
@@ -760,7 +1060,7 @@ export default definePluginEntry({
         }
 
         try {
-          const presentation = await renderPayload(ctx.callback.payload);
+          const presentation = await renderPayload(ctx.callback.payload, ctx);
           const text = presentation.title || "PROROK";
           const buttons = presentation.blocks
             .filter((block) => block.type === "buttons")
