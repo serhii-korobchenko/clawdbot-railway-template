@@ -11,6 +11,8 @@ from .auth import require_api_token
 from .config import ApiSettings
 from .db import readonly_connection, validate_database
 from .errors import DatabaseUnavailable
+from .latest_refresh_models import LatestRefreshResponse
+from .latest_refresh_repository import get_latest_refresh
 from .models import (
     EventDetailResponse,
     EventListResponse,
@@ -63,6 +65,15 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     ):
         with readonly_connection(resolved_settings.db_path) as conn:
             return list_events(conn, status=status, q=q)
+
+    @app.get(
+        "/api/v1/refresh/latest",
+        response_model=LatestRefreshResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def refresh_latest():
+        with readonly_connection(resolved_settings.db_path) as conn:
+            return get_latest_refresh(conn)
 
     @app.get(
         "/api/v1/events/{event_id}/latest-recommendation",
