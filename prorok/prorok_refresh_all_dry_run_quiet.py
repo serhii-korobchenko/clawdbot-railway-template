@@ -6,7 +6,7 @@ SQLite database and invokes the already-tested single-event quiet refresh launch
 for each event. Jobs are spaced out with incremental `--at` offsets to avoid
 starting too many OpenClaw cron jobs at the same time.
 
-For real scheduling runs, the launcher writes only the v3 refresh audit lifecycle:
+For real scheduling runs, the launcher writes only the refresh audit lifecycle:
 one refresh_runs batch plus one pending refresh_event_results snapshot per target,
 then records cron_id/run_at or schedule_failed. It never writes official PROROK
 assessments, evidence_items, sources, or event forecasts. --no-schedule remains a
@@ -76,14 +76,23 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def require_v3_schema(conn: sqlite3.Connection) -> None:
+def require_refresh_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
     current = version["value"] if version else None
-    if current != "3":
+    try:
+        current_version = int(current) if current is not None else None
+    except (TypeError, ValueError) as exc:
         raise RuntimeError(
-            f"PROROK schema v3 required for refresh lifecycle; current={current!r}"
+            "PROROK schema version must be an integer >= 3 for refresh lifecycle; "
+            f"current={current!r}"
+        ) from exc
+
+    if current_version is None or current_version < 3:
+        raise RuntimeError(
+            "PROROK schema v3+ required for refresh lifecycle; "
+            f"current={current!r}"
         )
 
     required_tables = {
@@ -100,7 +109,7 @@ def require_v3_schema(conn: sqlite3.Connection) -> None:
     missing = sorted(required_tables - tables)
     if missing:
         raise RuntimeError(
-            "PROROK v3 refresh tables missing: " + ", ".join(missing)
+            "PROROK refresh tables missing: " + ", ".join(missing)
         )
 
 
@@ -158,7 +167,7 @@ def create_refresh_batch(
     trigger_source: str,
 ) -> tuple[int, dict[str, int]]:
     with connect(db_path) as conn:
-        require_v3_schema(conn)
+        require_refresh_schema(conn)
         with conn:
             cur = conn.execute(
                 """

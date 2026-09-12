@@ -32,7 +32,7 @@ except ImportError:  # direct script execution from /app/prorok
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
 DEFAULT_STATE_DIR = "/data/.openclaw"
-COLLECTOR_VERSION = "2"
+COLLECTOR_VERSION = "3"
 TERMINAL_JOB_STATES = {
     "completed",
     "schedule_failed",
@@ -278,25 +278,14 @@ def _parse_iso_datetime(value: str, field: str) -> tuple[datetime, bool]:
     return parsed, is_date_only
 
 
-def compute_candidate_freshness(
+def resolve_baseline_datetime(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
-    parsed: Any,
-) -> dict[int, str]:
-    """Compute authoritative freshness from publication time and baseline.
-
-    The LLM-provided freshness value remains in transcript_raw for audit/debug,
-    but it is not trusted for persistence. Date-only candidate values on the
-    same calendar day as the baseline assessment are conservatively treated as
-    missed_baseline_evidence because their publication time is unknown.
-    """
-    if not parsed.candidates:
-        return {}
-
+) -> datetime:
     baseline_assessment_id = row["baseline_assessment_id"]
     if baseline_assessment_id is None:
         raise RefreshParseError(
-            "candidate freshness computation requires baseline_assessment_id"
+            "candidate validation requires baseline_assessment_id"
         )
 
     baseline = conn.execute(
@@ -311,112 +300,132 @@ def compute_candidate_freshness(
 
     if baseline is None or not baseline["assessed_at"]:
         raise RefreshParseError(
-            "candidate freshness computation could not resolve baseline assessed_at"
+            "candidate validation could not resolve baseline assessed_at"
         )
 
     baseline_dt, _ = _parse_iso_datetime(
         str(baseline["assessed_at"]),
         "baseline assessed_at",
     )
-
-    computed: dict[int, str] = {}
-
-    for candidate in parsed.candidates:
-        published_dt, published_is_date_only = _parse_iso_datetime(
-            candidate.published_at,
-            f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
-        )
-
-        if published_is_date_only:
-            is_after_baseline = published_dt.date() > baseline_dt.date()
-        else:
-            is_after_baseline = published_dt > baseline_dt
-
-        computed[candidate.ordinal] = (
-            "new_after_last_assessment"
-            if is_after_baseline
-            else "missed_baseline_evidence"
-        )
-
-    return computed
+    return baseline_dt
 
 
-def validate_candidate_source_policy(parsed: Any) -> None:
-    """Reject candidate evidence from domains forbidden by the refresh contract."""
-    for candidate in parsed.candidates:
-        hostname = (urlparse(candidate.url).hostname or "").lower().rstrip(".")
-        if not hostname:
-            continue
-
-        banned = next(
-            (
-                domain
-                for domain in BANNED_SOURCE_DOMAINS
-                if hostname == domain or hostname.endswith(f".{domain}")
-            ),
-            None,
-        )
-        if banned is not None:
-            raise RefreshParseError(
-                "source policy violation in "
-                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
-                f"domain {hostname!r} is banned by the refresh evidence policy"
-            )
-
-
-def validate_candidate_url_date_consistency(
+def validate_candidates(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
     parsed: Any,
-) -> None:
-    """Reject conflicting publication dates for the same URL across refreshes."""
+) -> dict[int, dict[str, str | None]]:
+    """Validate candidates independently and return deterministic quarantine state.
+
+    Candidate-level metadata/source/date problems are audit outcomes, not
+    collector execution failures. Global parser/baseline failures still raise
+    RefreshParseError and fail the event result.
+    """
+    if not parsed.candidates:
+        return {}
+
+    baseline_dt = resolve_baseline_datetime(conn, row)
+    validated: dict[int, dict[str, str | None]] = {}
+
     for candidate in parsed.candidates:
-        current_dt, _ = _parse_iso_datetime(
-            candidate.published_at,
-            f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
-        )
-        current_date = current_dt.date().isoformat()
+        state = "accepted"
+        reason: str | None = None
+        freshness: str | None = None
 
-        prior_rows = conn.execute(
-            """
-            SELECT DISTINCT c.published_at
-            FROM refresh_candidate_evidence c
-            JOIN refresh_event_results rer
-              ON rer.refresh_event_result_id = c.refresh_event_result_id
-            WHERE rer.event_id = ?
-              AND c.url = ?
-              AND c.refresh_event_result_id != ?
-              AND c.published_at IS NOT NULL
-              AND TRIM(c.published_at) != ''
-            ORDER BY c.published_at
-            """,
-            (
-                row["event_id"],
-                candidate.url,
-                row["refresh_event_result_id"],
-            ),
-        ).fetchall()
-
-        if not prior_rows:
-            continue
-
-        prior_raw = [str(prior["published_at"]) for prior in prior_rows]
-        prior_dates: set[str] = set()
-        for prior_value in prior_raw:
-            prior_dt, _ = _parse_iso_datetime(
-                prior_value,
-                "historical candidate published_at",
+        try:
+            published_dt, published_is_date_only = _parse_iso_datetime(
+                candidate.published_at,
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
             )
-            prior_dates.add(prior_dt.date().isoformat())
-
-        if prior_dates != {current_date}:
-            raise RefreshParseError(
-                "published_at conflict in "
-                f"CANDIDATE_EVIDENCE/{candidate.ordinal}: "
-                f"URL {candidate.url!r} has current published_at "
-                f"{candidate.published_at!r}, while prior refresh candidate "
-                f"date(s) are {', '.join(sorted(prior_raw))}"
+            if published_is_date_only:
+                is_after_baseline = published_dt.date() > baseline_dt.date()
+            else:
+                is_after_baseline = published_dt > baseline_dt
+            freshness = (
+                "new_after_last_assessment"
+                if is_after_baseline
+                else "missed_baseline_evidence"
             )
+        except RefreshParseError as exc:
+            state = "rejected_invalid_metadata"
+            reason = str(exc)
+
+        if state == "accepted":
+            hostname = (urlparse(candidate.url).hostname or "").lower().rstrip(".")
+            banned = next(
+                (
+                    domain
+                    for domain in BANNED_SOURCE_DOMAINS
+                    if hostname == domain or hostname.endswith(f".{domain}")
+                ),
+                None,
+            )
+            if banned is not None:
+                state = "rejected_source_policy"
+                reason = (
+                    f"domain {hostname!r} is banned by the refresh evidence policy"
+                )
+
+        if state == "accepted":
+            current_dt, _ = _parse_iso_datetime(
+                candidate.published_at,
+                f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
+            )
+            current_date = current_dt.date().isoformat()
+
+            prior_rows = conn.execute(
+                """
+                SELECT DISTINCT c.published_at
+                FROM refresh_candidate_evidence c
+                JOIN refresh_event_results rer
+                  ON rer.refresh_event_result_id = c.refresh_event_result_id
+                WHERE rer.event_id = ?
+                  AND c.url = ?
+                  AND c.refresh_event_result_id != ?
+                  AND c.published_at IS NOT NULL
+                  AND TRIM(c.published_at) != ''
+                ORDER BY c.published_at
+                """,
+                (
+                    row["event_id"],
+                    candidate.url,
+                    row["refresh_event_result_id"],
+                ),
+            ).fetchall()
+
+            if prior_rows:
+                prior_raw = [str(prior["published_at"]) for prior in prior_rows]
+                prior_dates: set[str] = set()
+                invalid_prior: str | None = None
+                for prior_value in prior_raw:
+                    try:
+                        prior_dt, _ = _parse_iso_datetime(
+                            prior_value,
+                            "historical candidate published_at",
+                        )
+                    except RefreshParseError as exc:
+                        invalid_prior = str(exc)
+                        break
+                    prior_dates.add(prior_dt.date().isoformat())
+
+                if invalid_prior is not None:
+                    state = "rejected_invalid_metadata"
+                    reason = invalid_prior
+                elif prior_dates != {current_date}:
+                    state = "rejected_date_conflict"
+                    reason = (
+                        f"URL {candidate.url!r} has current published_at "
+                        f"{candidate.published_at!r}, while prior refresh candidate "
+                        f"date(s) are {', '.join(sorted(prior_raw))}"
+                    )
+
+        validated[candidate.ordinal] = {
+            "validation_state": state,
+            "rejection_reason": reason,
+            "freshness": freshness,
+        }
+
+    return validated
 
 
 def mark_failure(
@@ -460,7 +469,7 @@ def apply_success(
     transcript: str,
     transcript_sha256: str,
     parsed: Any,
-    computed_freshness: dict[int, str],
+    candidate_validation: dict[int, dict[str, str | None]],
 ) -> None:
     source_run_key = run.source_run_key
     if source_run_key is None:
@@ -494,6 +503,40 @@ def apply_success(
             raise RuntimeError("same source_run_key has a different transcript hash")
 
     fields = parsed.event_result_fields()
+    accepted = [
+        candidate
+        for candidate in parsed.candidates
+        if candidate_validation[candidate.ordinal]["validation_state"] == "accepted"
+    ]
+    rejected_count = len(parsed.candidates) - len(accepted)
+    recommendation_valid = rejected_count == 0
+
+    fields["outcome"] = (
+        "new_evidence" if accepted
+        else ("no_new_evidence" if parsed.candidates else parsed.outcome)
+    )
+    fields["new_evidence_count"] = len(accepted)
+    fields["indicator_count"] = sum(
+        1 for candidate in accepted if candidate.direction == "indicator"
+    )
+    fields["counterindicator_count"] = sum(
+        1 for candidate in accepted if candidate.direction == "counterindicator"
+    )
+    fields["candidate_rejected_count"] = rejected_count
+    fields["recommendation_valid"] = int(recommendation_valid)
+
+    if not recommendation_valid:
+        fields["recommended_probability"] = None
+        fields["recommended_band"] = None
+        fields["recommended_label"] = None
+        fields["change_from_baseline"] = "no_update"
+        fields["change_recommended"] = 0
+        fields["recommendation_confidence"] = None
+        fields["recommendation_reason"] = (
+            f"LLM recommendation invalidated because {rejected_count} "
+            "candidate(s) failed deterministic validation."
+        )
+
     fields.update(
         {
             "job_state": "completed",
@@ -548,9 +591,11 @@ def apply_success(
                 summary,
                 why_it_matters,
                 duplicate_risk,
-                freshness
+                freshness,
+                validation_state,
+                rejection_reason
             )
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 row["refresh_event_result_id"],
@@ -566,7 +611,9 @@ def apply_success(
                 candidate["summary"],
                 candidate["why_it_matters"],
                 candidate["duplicate_risk"],
-                computed_freshness[candidate["ordinal"]],
+                candidate_validation[candidate["ordinal"]]["freshness"],
+                candidate_validation[candidate["ordinal"]]["validation_state"],
+                candidate_validation[candidate["ordinal"]]["rejection_reason"],
             ),
         )
 
@@ -716,9 +763,7 @@ def collect_one(
             expected_event_id=row["event_id"],
             expected_baseline_probability=row["baseline_probability"],
         )
-        computed_freshness = compute_candidate_freshness(conn, row, parsed)
-        validate_candidate_source_policy(parsed)
-        validate_candidate_url_date_consistency(conn, row, parsed)
+        candidate_validation = validate_candidates(conn, row, parsed)
     except RefreshParseError as exc:
         with conn:
             mark_failure(
@@ -750,7 +795,7 @@ def collect_one(
                 transcript,
                 transcript_sha256,
                 parsed,
-                computed_freshness,
+                candidate_validation,
             )
             recompute_batch(conn, row["refresh_id"])
     except sqlite3.IntegrityError as exc:
