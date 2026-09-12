@@ -81,9 +81,17 @@ def require_refresh_schema(conn: sqlite3.Connection) -> None:
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
     current = version["value"] if version else None
-    if current not in {"3", "4"}:
+    try:
+        current_version = int(current) if current is not None else None
+    except (TypeError, ValueError) as exc:
         raise RuntimeError(
-            "PROROK schema v3 or v4 required for refresh lifecycle; "
+            "PROROK schema version must be an integer >= 3 for refresh lifecycle; "
+            f"current={current!r}"
+        ) from exc
+
+    if current_version is None or current_version < 3:
+        raise RuntimeError(
+            "PROROK schema v3+ required for refresh lifecycle; "
             f"current={current!r}"
         )
 
