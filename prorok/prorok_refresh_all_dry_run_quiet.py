@@ -356,6 +356,7 @@ def run_one(script: Path, target: RefreshTarget, args: argparse.Namespace, at_va
         args.tools,
         "--evidence-limit",
         str(args.evidence_limit),
+        "--no-deliver",
     ]
     if args.no_schedule:
         cmd.append("--no-schedule")
@@ -452,7 +453,7 @@ def main(argv: list[str]) -> int:
             return 1
         print(f"refresh_id: {refresh_id}")
         print(f"trigger_source: {args.trigger_source}")
-        print(f"batch_phase: scheduling")
+        print("batch_phase: scheduling")
 
     failures = 0
     for idx, target in enumerate(targets, start=1):
