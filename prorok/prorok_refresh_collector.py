@@ -382,6 +382,7 @@ def validate_candidates(
                 WHERE rer.event_id = ?
                   AND c.url = ?
                   AND c.refresh_event_result_id != ?
+                  AND c.validation_state = 'accepted'
                   AND c.published_at IS NOT NULL
                   AND TRIM(c.published_at) != ''
                 ORDER BY c.published_at
