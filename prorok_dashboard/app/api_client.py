@@ -100,5 +100,8 @@ class ProrokApiClient:
             params["q"] = q
         return await self._get("/api/v1/events", params=params)
 
+    async def get_latest_refresh(self) -> dict[str, Any]:
+        return await self._get("/api/v1/refresh/latest")
+
     async def get_event(self, event_id: str) -> dict[str, Any]:
         return await self._get(f"/api/v1/events/{event_id}")

@@ -9,6 +9,77 @@
   <div class="total-count">{{ data.total }} подій</div>
 </section>
 
+{% set refresh = latest_refresh.refresh if latest_refresh else None %}
+{% if refresh %}
+<section class="section-block" aria-labelledby="latest-refresh-title">
+  <div class="section-heading-row">
+    <div>
+      <p class="eyebrow">Останнє оновлення</p>
+      <h2 id="latest-refresh-title">Refresh #{{ refresh.refresh_id }} · {{ refresh.status }}</h2>
+    </div>
+    <span class="count-pill">{{ refresh.finished_at|fmt_datetime if refresh.finished_at else refresh.started_at|fmt_datetime }}</span>
+  </div>
+
+  <div class="card-metrics">
+    <span>Перевірено: <strong>{{ refresh.events_checked }}</strong></span>
+    <span>Нових candidate evidence: <strong>{{ refresh.new_evidence_count }}</strong></span>
+    <span>Рекомендацій: <strong>{{ refresh.recommendations_count }}</strong></span>
+    <span>Без змін: <strong>{{ refresh.no_change_count }}</strong></span>
+    <span>Помилок: <strong>{{ refresh.error_count }}</strong></span>
+    {% if refresh.collector_version %}<span>Collector v{{ refresh.collector_version }}</span>{% endif %}
+  </div>
+
+  <p>
+    {% if refresh.error_count > 0 %}
+      Оновлення завершилося з {{ refresh.error_count }} помилк{{ 'ою' if refresh.error_count == 1 else 'ами' }}.
+    {% elif refresh.new_evidence_count == 0 and refresh.recommendations_count == 0 %}
+      Нових evidence не виявлено. Нових рекомендацій немає. Official forecasts не змінювалися.
+    {% else %}
+      Знайдено {{ refresh.new_evidence_count }} candidate evidence; сформовано {{ refresh.recommendations_count }} рекомендаці{{ 'ю' if refresh.recommendations_count == 1 else 'й' }}.
+    {% endif %}
+  </p>
+
+  {% if latest_refresh.results %}
+  <details class="inline-details">
+    <summary>Деталі по подіях ({{ latest_refresh.results|length }})</summary>
+    {% for item in latest_refresh.results %}
+    <div class="criteria-item">
+      <h3>{{ item.event_title_snapshot }}</h3>
+      <div class="inline-meta">
+        <span>Outcome: {{ item.outcome or '—' }}</span>
+        <span>{{ item.indicator_count }} indicator</span>
+        <span>{{ item.counterindicator_count }} counterindicator</span>
+        <span>Відхилено: {{ item.candidate_rejected_count }}</span>
+      </div>
+
+      {% if item.recommended_probability is not none %}
+      <p>
+        Рекомендація:
+        {% if item.baseline_probability is not none %}<strong>{{ item.baseline_probability }}%</strong> → {% endif %}
+        <strong>{{ item.recommended_probability }}%</strong>
+        {% if item.recommendation_confidence %}· confidence {{ item.recommendation_confidence }}{% endif %}
+      </p>
+      {% endif %}
+
+      {% if item.decision %}
+      <p>
+        Рішення користувача:
+        {% if item.decision.decision_type == 'accept_recommendation' %}рекомендацію прийнято{% elif item.decision.decision_type == 'custom_probability' %}встановлено власну оцінку{% else %}поточну оцінку залишено без змін{% endif %}
+        → <strong>{{ item.decision.selected_probability }}%</strong>.
+        {% if item.current_probability is not none %} Official forecast: <strong>{{ item.current_probability }}%</strong>.{% endif %}
+      </p>
+      {% elif item.change_recommended %}
+      <p class="muted">Очікує рішення користувача.</p>
+      {% elif item.current_probability is not none %}
+      <p class="muted">Official forecast: {{ item.current_probability }}%.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </details>
+  {% endif %}
+</section>
+{% endif %}
+
 <nav class="status-tabs" aria-label="Фільтр статусу">
   {% set tabs = [
     (None, 'Усі', data.total),

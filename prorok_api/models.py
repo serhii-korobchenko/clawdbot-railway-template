@@ -9,6 +9,12 @@ EventStatus = Literal["active", "paused", "resolved", "archived"]
 Confidence = Literal["low", "medium", "high"]
 EvidenceDirection = Literal["indicator", "counterindicator", "neutral"]
 EvidenceStrength = Literal["weak", "medium", "strong"]
+RefreshDecisionType = Literal[
+    "accept_recommendation",
+    "custom_probability",
+    "keep_current",
+]
+RecommendationStatus = Literal["actionable", "decided", "stale", "no_change"]
 
 
 class DecisionCriteriaDTO(BaseModel):
@@ -104,3 +110,40 @@ class EventDetailResponse(BaseModel):
     assessments: list[AssessmentDTO]
     evidence: list[EvidenceDTO]
     limitations: LimitationsDTO
+
+
+class RefreshDecisionDTO(BaseModel):
+    decision_id: int
+    decision_type: RefreshDecisionType
+    selected_probability: int
+    assessment_id: int | None
+    decision_source: str
+    decided_at: str
+
+
+class LatestRecommendationDTO(BaseModel):
+    refresh_event_result_id: int
+    refresh_id: int
+    created_at: str
+    outcome: str | None
+    baseline_assessment_id: int
+    baseline_probability: int
+    recommended_probability: int
+    recommended_band: str | None
+    recommended_label: str | None
+    recommendation_confidence: Confidence | None
+    recommendation_reason: str | None
+    change_recommended: bool
+    candidate_rejected_count: int
+    recommendation_valid: bool
+    current_assessment_id: int | None
+    current_probability: int | None
+    is_stale: bool
+    actionable: bool
+    status: RecommendationStatus
+    decision: RefreshDecisionDTO | None
+
+
+class LatestRecommendationResponse(BaseModel):
+    event_id: str
+    recommendation: LatestRecommendationDTO | None

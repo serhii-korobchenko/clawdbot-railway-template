@@ -3,7 +3,8 @@
 
 The launcher reads the current event, latest assessment, and recent evidence from the
 PROROK SQLite database, builds a structured no-write refresh prompt, and schedules a
-one-shot Telegram delivery through `openclaw cron add`.
+one-shot OpenClaw job. Delivery is announced to Telegram by default; callers can use
+`--no-deliver` for silent batch refresh workers.
 
 It intentionally does not write to the PROROK database. The resulting agent job is
 also instructed not to call `/prorok add-evidence` or `/prorok assess`; human review is
@@ -283,14 +284,21 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
         "--tools",
         args.tools,
         "--expect-final",
-        "--announce",
-        "--channel",
-        "telegram",
-        "--to",
-        args.to,
-        "--thread-id",
-        str(args.thread_id),
     ]
+    if args.no_deliver:
+        cmd.append("--no-deliver")
+    else:
+        cmd.extend(
+            [
+                "--announce",
+                "--channel",
+                "telegram",
+                "--to",
+                args.to,
+                "--thread-id",
+                str(args.thread_id),
+            ]
+        )
     subprocess.run(cmd, check=True)
 
 
@@ -307,6 +315,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--agent", default="main", help="OpenClaw agent id")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=DEFAULT_TOOLS, help="Tool allow-list for the agent job")
+    parser.add_argument("--no-deliver", action="store_true", help="Create the one-shot job without Telegram delivery")
     parser.add_argument("--no-schedule", action="store_true", help="Only write the prompt file; do not create cron job")
     parser.add_argument("--evidence-limit", type=int, default=12, help="Number of latest evidence rows to include")
     return parser.parse_args(argv)
