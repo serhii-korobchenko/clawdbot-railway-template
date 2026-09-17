@@ -83,9 +83,9 @@
   </div>
 </form>
 
-{% if data.items %}
+{% if data["items"] %}
 <div class="evidence-list">
-  {% for item in data.items %}
+  {% for item in data["items"] %}
   {% if tab == 'official' %}
   <article class="evidence-card evidence-{{ item.direction }}">
     <div class="evidence-card-head">
