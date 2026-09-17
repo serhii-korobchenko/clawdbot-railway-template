@@ -5,7 +5,7 @@ This CLI is the write boundary for explicit delete actions initiated from
 Telegram or manual CLI. It never asks an LLM to decide what should be deleted.
 
 Rules:
-- schema v6 is required;
+- schema v6 or newer is required;
 - deletion_audit snapshot is written in the same transaction before deletion;
 - deleting evidence never deletes its source;
 - deleting an event relies on declared SQLite FK semantics for dependent rows;
@@ -25,7 +25,7 @@ from typing import Iterable, Sequence
 
 DEFAULT_PROROK_HOME = "/data/workspace/prorok"
 DEFAULT_DB_NAME = "prorok.sqlite3"
-REQUIRED_SCHEMA_VERSION = "6"
+MIN_SCHEMA_VERSION = 6
 SOURCE_CHOICES = ("telegram", "manual_cli", "system")
 
 
@@ -80,9 +80,15 @@ def schema_version(conn: sqlite3.Connection) -> str | None:
 
 def require_schema_v6(conn: sqlite3.Connection) -> None:
     version = schema_version(conn)
-    if version != REQUIRED_SCHEMA_VERSION:
+    try:
+        version_number = int(version) if version is not None else None
+    except (TypeError, ValueError) as exc:
         raise CliError(
-            f"schema v{REQUIRED_SCHEMA_VERSION} required; current schema_version={version!r}"
+            f"schema v{MIN_SCHEMA_VERSION}+ required; current schema_version={version!r}"
+        ) from exc
+    if version_number is None or version_number < MIN_SCHEMA_VERSION:
+        raise CliError(
+            f"schema v{MIN_SCHEMA_VERSION}+ required; current schema_version={version!r}"
         )
     table = fetch_one(
         conn,
