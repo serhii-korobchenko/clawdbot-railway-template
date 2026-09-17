@@ -5,7 +5,7 @@ This CLI is the deterministic write boundary for Telegram decision actions.
 It never asks an LLM to change an official forecast.
 
 Rules:
-- schema v5 is required;
+- schema v5 or newer is required;
 - only completed, valid refresh recommendations may be decided;
 - the refresh baseline must still be the current official assessment;
 - one final decision is allowed per refresh_event_result_id;
@@ -26,7 +26,7 @@ from typing import Iterable, Sequence
 
 DEFAULT_PROROK_HOME = "/data/workspace/prorok"
 DEFAULT_DB_NAME = "prorok.sqlite3"
-REQUIRED_SCHEMA_VERSION = "5"
+MIN_SCHEMA_VERSION = 5
 
 DECISION_ACCEPT = "accept_recommendation"
 DECISION_CUSTOM = "custom_probability"
@@ -99,9 +99,15 @@ def schema_version(conn: sqlite3.Connection) -> str | None:
 
 def require_schema_v5(conn: sqlite3.Connection) -> None:
     version = schema_version(conn)
-    if version != REQUIRED_SCHEMA_VERSION:
+    try:
+        version_number = int(version) if version is not None else None
+    except (TypeError, ValueError) as exc:
         raise CliError(
-            f"schema v{REQUIRED_SCHEMA_VERSION} required; current schema_version={version!r}"
+            f"schema v{MIN_SCHEMA_VERSION}+ required; current schema_version={version!r}"
+        ) from exc
+    if version_number is None or version_number < MIN_SCHEMA_VERSION:
+        raise CliError(
+            f"schema v{MIN_SCHEMA_VERSION}+ required; current schema_version={version!r}"
         )
     table = fetch_one(
         conn,
