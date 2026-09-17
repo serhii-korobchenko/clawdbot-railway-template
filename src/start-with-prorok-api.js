@@ -90,7 +90,7 @@ spawnManaged(
 spawnManaged(
   "python3",
   [
-    "prorok/prorok_refresh_collector.py",
+    "prorok/prorok_refresh_collector_v4.py",
     "--interval-seconds",
     collectorInterval,
   ],
