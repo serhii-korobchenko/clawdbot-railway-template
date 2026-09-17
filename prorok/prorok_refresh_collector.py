@@ -207,16 +207,32 @@ def extract_final_assistant_text(session_path: Path) -> str:
     return last_text
 
 
-def resolve_session_transcript_path(state_dir: Path, session_id: str) -> Path:
+def resolve_session_transcript_path(
+    state_dir: Path,
+    session_id: str,
+    session_key: str | None = None,
+) -> Path:
     """Resolve a live or OpenClaw-retired isolated-session transcript.
 
-    OpenClaw may retire delete-after-run isolated sessions by renaming
-    <sessionId>.jsonl to <sessionId>.jsonl.deleted.<ISO timestamp>. Prefer the
-    live transcript when it still exists; otherwise use the newest retired
-    transcript. The timestamp suffix is ISO-formatted, so filename ordering is
-    chronological for files belonging to the same session id.
+    OpenClaw stores isolated session transcripts under the agent namespace.
+    Current cron session keys use ``agent:<agent_id>:cron:...``. Older/manual
+    records may not provide a usable session key, so ``main`` remains the
+    backwards-compatible fallback.
     """
-    session_dir = state_dir / "agents" / "main" / "sessions"
+    agent_id = "main"
+    key = (session_key or "").strip()
+    if key.startswith("agent:"):
+        parts = key.split(":", 2)
+        if len(parts) >= 2:
+            candidate = parts[1].strip()
+            if (
+                candidate
+                and candidate not in {".", ".."}
+                and Path(candidate).name == candidate
+            ):
+                agent_id = candidate
+
+    session_dir = state_dir / "agents" / agent_id / "sessions"
     live_path = session_dir / f"{session_id}.jsonl"
     if live_path.exists():
         return live_path
@@ -235,7 +251,11 @@ def transcript_for_run(state_dir: Path, run: CronRun) -> tuple[str, str]:
     if not run.session_id:
         raise FileNotFoundError("cron run has no sessionId")
 
-    session_path = resolve_session_transcript_path(state_dir, run.session_id)
+    session_path = resolve_session_transcript_path(
+        state_dir,
+        run.session_id,
+        run.session_key,
+    )
     text = extract_final_assistant_text(session_path)
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return text, digest
