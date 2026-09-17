@@ -21,6 +21,7 @@ import sys
 from typing import Any
 
 import prorok_refresh_dry_run_cron as launcher
+from prorok_refresh_search_protocol import apply_search_protocol
 
 
 SUMMARY: dict[str, str] = {}
@@ -148,7 +149,6 @@ def harden_no_evidence_format(prompt: str) -> str:
     prompt = prompt.replace(reason_placeholder, reason_hardened)
     prompt = prompt.replace(rationale_placeholder, rationale_hardened)
 
-    # Add an extra validation note immediately before the first DB_ACTION in the final format.
     validation_note = (
         "\nNO_NEW_EVIDENCE_VALIDATION:\n"
         f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, reason MUST_EQUAL: {NO_EVIDENCE_REASON}\n"
@@ -166,11 +166,12 @@ def guarded_build_prompt(*args: Any, **kwargs: Any) -> str:
     prompt = REAL_BUILD_PROMPT(*args, **kwargs)
     prompt = harden_no_evidence_format(prompt)
     marker = "\nФормат фінальної відповіді:"
-    if NO_NEW_EVIDENCE_GUARD in prompt:
-        return prompt
-    if marker in prompt:
-        return prompt.replace(marker, "\n" + NO_NEW_EVIDENCE_GUARD + marker, 1)
-    return prompt + "\n\n" + NO_NEW_EVIDENCE_GUARD
+    if NO_NEW_EVIDENCE_GUARD not in prompt:
+        if marker in prompt:
+            prompt = prompt.replace(marker, "\n" + NO_NEW_EVIDENCE_GUARD + marker, 1)
+        else:
+            prompt = prompt + "\n\n" + NO_NEW_EVIDENCE_GUARD
+    return apply_search_protocol(prompt)
 
 
 def _extract_summary(stdout: str) -> dict[str, str]:
