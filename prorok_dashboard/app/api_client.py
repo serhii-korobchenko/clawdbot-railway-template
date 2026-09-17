@@ -100,6 +100,53 @@ class ProrokApiClient:
             params["q"] = q
         return await self._get("/api/v1/events", params=params)
 
+    async def list_evidence(
+        self,
+        *,
+        event_id: str | None = None,
+        direction: str | None = None,
+        strength: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if event_id:
+            params["event_id"] = event_id
+        if direction:
+            params["direction"] = direction
+        if strength:
+            params["strength"] = strength
+        if source:
+            params["source"] = source
+        if q:
+            params["q"] = q
+        return await self._get("/api/v1/evidence", params=params)
+
+    async def list_candidate_evidence(
+        self,
+        *,
+        event_id: str | None = None,
+        direction: str | None = None,
+        strength: str | None = None,
+        validation_state: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if event_id:
+            params["event_id"] = event_id
+        if direction:
+            params["direction"] = direction
+        if strength:
+            params["strength"] = strength
+        if validation_state:
+            params["validation_state"] = validation_state
+        if source:
+            params["source"] = source
+        if q:
+            params["q"] = q
+        return await self._get("/api/v1/evidence/candidates", params=params)
+
     async def get_latest_refresh(self) -> dict[str, Any]:
         return await self._get("/api/v1/refresh/latest")
 
