@@ -92,7 +92,7 @@ def _build_search_protocol(prompt: str) -> str:
 
     return f"""
 13. Mandatory search protocol before final report:
-   - основний інструмент для search #1, #2 і #3: tavily_search; web_search використовуй тільки як fallback, якщо tavily_search недоступний або повернув технічну помилку;
+   - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: tavily_search; не використовуй web_search як fallback; якщо tavily_search недоступний або повернув технічну помилку, не підмінюй його іншим search tool;
    - виконай щонайменше 3 окремі search calls з різними query;
    - search #1: broad factual search за основним формулюванням події;
    - search #2: indicator search — шукай нові факти, що можуть підвищити probability;
