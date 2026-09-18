@@ -9,6 +9,8 @@ Rules:
 - only completed, valid refresh recommendations may be decided;
 - the refresh baseline must still be the current official assessment;
 - one final decision is allowed per refresh_event_result_id;
+- an undecided refresh is rejected if a newer refresh for the same event has
+  already been finalized;
 - every final decision promotes all quarantine-accepted refresh candidates into
   official evidence;
 - accept/custom append an official assessment;
@@ -221,6 +223,63 @@ def load_existing_decision(
         WHERE refresh_event_result_id = ?
         """,
         (refresh_event_result_id,),
+    )
+
+
+def load_newer_finalized_decision(
+    conn: sqlite3.Connection,
+    refresh: sqlite3.Row,
+) -> sqlite3.Row | None:
+    """Return the newest finalized refresh that supersedes this refresh."""
+    return fetch_one(
+        conn,
+        """
+        SELECT
+            newer.refresh_event_result_id,
+            newer.refresh_id,
+            decision.decision_id,
+            decision.decision_type,
+            decision.selected_probability,
+            decision.decided_at
+        FROM refresh_event_results newer
+        JOIN refresh_user_decisions decision
+          ON decision.refresh_event_result_id = newer.refresh_event_result_id
+        WHERE newer.event_id = ?
+          AND (
+                newer.refresh_id > ?
+                OR (
+                    newer.refresh_id = ?
+                    AND newer.refresh_event_result_id > ?
+                )
+          )
+        ORDER BY
+            newer.refresh_id DESC,
+            newer.refresh_event_result_id DESC
+        LIMIT 1
+        """,
+        (
+            str(refresh["event_id"]),
+            int(refresh["refresh_id"]),
+            int(refresh["refresh_id"]),
+            int(refresh["refresh_event_result_id"]),
+        ),
+    )
+
+
+def reject_if_superseded(
+    conn: sqlite3.Connection,
+    refresh: sqlite3.Row,
+) -> None:
+    newer = load_newer_finalized_decision(conn, refresh)
+    if newer is None:
+        return
+
+    raise CliError(
+        "stale refresh: superseded by finalized "
+        f"refresh_event_result_id={int(newer['refresh_event_result_id'])} "
+        f"refresh_id={int(newer['refresh_id'])} "
+        f"decision_id={int(newer['decision_id'])} "
+        f"decision_type={newer['decision_type']}"
     )
 
 
@@ -678,6 +737,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
                 conn.rollback()
                 print_existing_decision(conn, existing)
                 return 0
+
+            # A later finalized refresh supersedes every earlier undecided
+            # refresh for the same event, even when keep_current left the
+            # baseline assessment id/probability unchanged.
+            reject_if_superseded(conn, refresh)
 
             current = current_assessment(conn, str(event_id))
             validate_refresh_is_actionable(refresh, current)
