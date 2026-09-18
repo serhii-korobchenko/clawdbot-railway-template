@@ -29,7 +29,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from prorok_evidence_cli import canonicalize_url
+try:
+    from .prorok_evidence_cli import canonicalize_url
+except ImportError:  # direct script execution from /app/prorok
+    from prorok_evidence_cli import canonicalize_url
 
 DEFAULT_PROROK_HOME = "/data/workspace/prorok"
 DEFAULT_DB_NAME = "prorok.sqlite3"
@@ -482,6 +485,36 @@ def build_rationale(
     return text
 
 
+def assert_candidate_source_not_already_official(
+    conn: sqlite3.Connection,
+    *,
+    candidate_id: int,
+    event_id: str,
+    raw_url: str,
+) -> None:
+    """Fail closed when this canonical source already exists for the event."""
+    _canonical_url, canonical_hash, _domain = canonicalize_url(raw_url)
+    existing = fetch_one(
+        conn,
+        """
+        SELECT e.evidence_id, e.source_id
+        FROM evidence_items e
+        JOIN sources s ON s.source_id = e.source_id
+        WHERE e.event_id = ?
+          AND s.canonical_url_hash = ?
+        ORDER BY e.evidence_id
+        LIMIT 1
+        """,
+        (event_id, canonical_hash),
+    )
+    if existing is not None:
+        raise CliError(
+            "candidate source already exists as official evidence for this event: "
+            f"candidate_id={candidate_id} evidence_id={existing['evidence_id']} "
+            f"source_id={existing['source_id']}"
+        )
+
+
 def upsert_candidate_source(
     conn: sqlite3.Connection,
     candidate: sqlite3.Row,
@@ -567,6 +600,12 @@ def promote_candidate(
     validate_candidate_for_promotion(candidate)
 
     candidate_id = int(candidate["candidate_id"])
+    assert_candidate_source_not_already_official(
+        conn,
+        candidate_id=candidate_id,
+        event_id=event_id,
+        raw_url=str(candidate["url"]).strip(),
+    )
     source_id, new_source = upsert_candidate_source(
         conn,
         candidate,

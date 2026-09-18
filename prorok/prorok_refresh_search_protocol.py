@@ -8,10 +8,11 @@ from datetime import date, datetime, timezone
 
 
 _LAST_ASSESSED_RE = re.compile(r"^last_assessed_at:\s*(.+?)\s*$", re.MULTILINE)
+_SEARCH_AFTER_RE = re.compile(r"^search_after_at:\s*(.+?)\s*$", re.MULTILINE)
 
 
-def _parse_last_assessed_at(prompt: str) -> datetime | None:
-    match = _LAST_ASSESSED_RE.search(prompt)
+def _parse_datetime_field(prompt: str, pattern: re.Pattern[str]) -> datetime | None:
+    match = pattern.search(prompt)
     if not match:
         return None
 
@@ -41,6 +42,14 @@ def _parse_last_assessed_at(prompt: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_last_assessed_at(prompt: str) -> datetime | None:
+    return _parse_datetime_field(prompt, _LAST_ASSESSED_RE)
+
+
+def _parse_search_after_at(prompt: str) -> datetime | None:
+    return _parse_datetime_field(prompt, _SEARCH_AFTER_RE) or _parse_last_assessed_at(prompt)
+
+
 def _choose_tavily_time_range(
     last_assessed_at: datetime | None,
     now: datetime | None = None,
@@ -66,19 +75,19 @@ def _choose_tavily_time_range(
 
 
 def _build_search_protocol(prompt: str) -> str:
-    last_assessed_at = _parse_last_assessed_at(prompt)
-    tavily_time_range = _choose_tavily_time_range(last_assessed_at)
+    search_after_at = _parse_search_after_at(prompt)
+    tavily_time_range = _choose_tavily_time_range(search_after_at)
 
-    if last_assessed_at is None:
-        boundary_text = "last_assessed_at не вдалося визначити як валідну дату"
+    if search_after_at is None:
+        boundary_text = "search_after_at/last_assessed_at не вдалося визначити як валідну дату"
         time_range_rule = (
             "не передавай time_range лише заради формального фільтра; "
             "не вигадуй часову межу"
         )
         exact_boundary = "невідома"
     else:
-        exact_boundary = last_assessed_at.isoformat().replace("+00:00", "Z")
-        boundary_text = f"точна межа last_assessed_at = {exact_boundary}"
+        exact_boundary = search_after_at.isoformat().replace("+00:00", "Z")
+        boundary_text = f"точна межа search_after_at = {exact_boundary}"
         if tavily_time_range:
             time_range_rule = (
                 f'для search #1, #2 і #3 передай time_range: "{tavily_time_range}" '
@@ -101,10 +110,10 @@ def _build_search_protocol(prompt: str) -> str:
    - {boundary_text};
    - {time_range_rule};
    - time_range є лише грубим pre-filter і НЕ замінює точну перевірку дати кожного результату;
-   - для кожного результату tavily_search перевір поле published; тільки матеріал із published ПІСЛЯ {exact_boundary} може мати freshness: new_after_last_assessment;
+   - для кожного результату tavily_search перевір поле published; тільки матеріал із published ПІСЛЯ {exact_boundary} може мати freshness: new_after_last_assessment; назва freshness є legacy schema label, фактична operational boundary — search_after_at;
    - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через tavily_extract (бажано одним batch-викликом) або web_fetch до фінального висновку;
-   - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою last_assessed_at, підтвердь точну дату/час через сторінку джерела, tavily_extract або web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
-   - матеріал із published ДО або НА межі last_assessed_at не є новим evidence; його можна розглядати лише окремо як missed_baseline_evidence, якщо він істотно змінює баланс оцінки;
+   - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою search_after_at, підтвердь точну дату/час через сторінку джерела, tavily_extract або web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
+   - матеріал із published ДО або НА межі search_after_at не є новим evidence; його можна розглядати лише окремо як missed_baseline_evidence, якщо він істотно змінює баланс оцінки;
    - правило чистоти query застосовується ДО КОЖНОГО tavily_search call без винятків: до search #1/#2/#3, zero-result retry, authority/source-specific checks і будь-яких додаткових пошуків;
    - поле query має містити тільки природномовні тематичні слова; НЕ вставляй у query URL, hostname/domain name або будь-який search-engine field qualifier у форматі key:value;
    - НЕ використовуй after:DATE у query; часову межу задавай тільки через time_range та подальшу перевірку published;

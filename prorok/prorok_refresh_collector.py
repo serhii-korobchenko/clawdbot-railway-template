@@ -26,8 +26,10 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 try:
+    from .prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
     from .prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 except ImportError:  # direct script execution from /app/prorok
+    from prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
     from prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
@@ -101,6 +103,13 @@ def connect_db(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone() is not None
 
 
 def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -330,6 +339,63 @@ def resolve_baseline_datetime(
     return baseline_dt
 
 
+def resolve_search_boundary_datetime(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+) -> datetime:
+    """Use the latest finalized refresh run start, else the baseline assessment."""
+    required = ("refresh_user_decisions", "refresh_event_results")
+    if all(_table_exists(conn, table) for table in required):
+        finalized = conn.execute(
+            """
+            SELECT rer.cron_run_at_ms
+            FROM refresh_user_decisions rud
+            JOIN refresh_event_results rer
+              ON rer.refresh_event_result_id = rud.refresh_event_result_id
+            WHERE rud.event_id_snapshot = ?
+              AND rer.event_id = ?
+              AND rer.job_state = 'completed'
+              AND rer.cron_status = 'ok'
+              AND rer.cron_run_at_ms IS NOT NULL
+            ORDER BY rud.decided_at DESC, rud.decision_id DESC
+            LIMIT 1
+            """,
+            (row["event_id"], row["event_id"]),
+        ).fetchone()
+        if finalized is not None and finalized["cron_run_at_ms"] is not None:
+            return datetime.fromtimestamp(
+                int(finalized["cron_run_at_ms"]) / 1000,
+                tz=timezone.utc,
+            )
+
+    return resolve_baseline_datetime(conn, row)
+
+
+def find_existing_official_evidence(
+    conn: sqlite3.Connection,
+    *,
+    event_id: str,
+    raw_url: str,
+) -> sqlite3.Row | None:
+    """Return official evidence for the same event and canonical source, if any."""
+    if not (_table_exists(conn, "sources") and _table_exists(conn, "evidence_items")):
+        return None
+
+    _canonical_url, canonical_hash, _domain = canonicalize_url(raw_url)
+    return conn.execute(
+        """
+        SELECT e.evidence_id, e.source_id, s.canonical_url_hash
+        FROM evidence_items e
+        JOIN sources s ON s.source_id = e.source_id
+        WHERE e.event_id = ?
+          AND s.canonical_url_hash = ?
+        ORDER BY e.evidence_id
+        LIMIT 1
+        """,
+        (event_id, canonical_hash),
+    ).fetchone()
+
+
 def validate_candidates(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -344,7 +410,7 @@ def validate_candidates(
     if not parsed.candidates:
         return {}
 
-    baseline_dt = resolve_baseline_datetime(conn, row)
+    search_boundary_dt = resolve_search_boundary_datetime(conn, row)
     validated: dict[int, dict[str, str | None]] = {}
 
     for candidate in parsed.candidates:
@@ -358,12 +424,12 @@ def validate_candidates(
                 f"CANDIDATE_EVIDENCE/{candidate.ordinal} published_at",
             )
             if published_is_date_only:
-                is_after_baseline = published_dt.date() > baseline_dt.date()
+                is_after_boundary = published_dt.date() > search_boundary_dt.date()
             else:
-                is_after_baseline = published_dt > baseline_dt
+                is_after_boundary = published_dt > search_boundary_dt
             freshness = (
                 "new_after_last_assessment"
-                if is_after_baseline
+                if is_after_boundary
                 else "missed_baseline_evidence"
             )
         except RefreshParseError as exc:
@@ -385,6 +451,25 @@ def validate_candidates(
                 reason = (
                     f"domain {hostname!r} is banned by the refresh evidence policy"
                 )
+
+        if state == "accepted":
+            try:
+                existing_official = find_existing_official_evidence(
+                    conn,
+                    event_id=str(row["event_id"]),
+                    raw_url=candidate.url,
+                )
+            except EvidenceCliError as exc:
+                state = "rejected_invalid_metadata"
+                reason = str(exc)
+            else:
+                if existing_official is not None:
+                    state = "rejected_source_policy"
+                    reason = (
+                        "canonical source already exists as official evidence "
+                        f"for this event (evidence_id={existing_official['evidence_id']}, "
+                        f"source_id={existing_official['source_id']})"
+                    )
 
         if state == "accepted":
             current_dt, _ = _parse_iso_datetime(

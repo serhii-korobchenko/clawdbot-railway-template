@@ -116,6 +116,53 @@ def load_latest_assessment(conn: sqlite3.Connection, event_id: str) -> Assessmen
     )
 
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone() is not None
+
+
+def _epoch_ms_to_utc_iso(value: int) -> str:
+    dt = datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def load_search_after_at(
+    conn: sqlite3.Connection,
+    event_id: str,
+    fallback_assessed_at: str,
+) -> str:
+    """Resolve the search boundary from the latest finalized refresh run start.
+
+    A finalized refresh advances evidence-search coverage even when the explicit
+    user decision was keep_current and therefore created no new assessment.
+    Older schemas/prompts fall back to the latest official assessment timestamp.
+    """
+    required = ("refresh_user_decisions", "refresh_event_results")
+    if all(_table_exists(conn, table) for table in required):
+        row = conn.execute(
+            """
+            SELECT rer.cron_run_at_ms
+            FROM refresh_user_decisions rud
+            JOIN refresh_event_results rer
+              ON rer.refresh_event_result_id = rud.refresh_event_result_id
+            WHERE rud.event_id_snapshot = ?
+              AND rer.event_id = ?
+              AND rer.job_state = 'completed'
+              AND rer.cron_status = 'ok'
+              AND rer.cron_run_at_ms IS NOT NULL
+            ORDER BY rud.decided_at DESC, rud.decision_id DESC
+            LIMIT 1
+            """,
+            (event_id, event_id),
+        ).fetchone()
+        if row is not None and row["cron_run_at_ms"] is not None:
+            return _epoch_ms_to_utc_iso(int(row["cron_run_at_ms"]))
+
+    return fallback_assessed_at or "n/a"
+
+
 def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> list[str]:
     rows = conn.execute(
         """
@@ -143,8 +190,14 @@ def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> 
     return lines
 
 
-def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: list[str]) -> str:
+def build_prompt(
+    event: EventState,
+    latest: AssessmentState,
+    evidence_lines: list[str],
+    search_after_at: str | None = None,
+) -> str:
     evidence_text = "\n".join(evidence_lines)
+    search_after = search_after_at or latest.assessed_at or "n/a"
     return f"""Виконай DRY-RUN оновлення PROROK для події {event.event_id}.
 
 ВАЖЛИВО:
@@ -170,13 +223,14 @@ current_band: {latest.band}
 current_label: {latest.label}
 current_confidence: {latest.confidence}
 last_assessed_at: {latest.assessed_at}
+search_after_at: {search_after}
 latest_rationale: {latest.rationale}
 
 Поточний evidence baseline, latest first:
 {evidence_text}
 
 Завдання пошуку:
-1. Знайди тільки нові або суттєво релевантні після last_assessed_at матеріали щодо події.
+1. Знайди тільки нові або суттєво релевантні після search_after_at матеріали щодо події.
 2. Відібери максимум 3 candidate evidence. Краще повернути NO_NEW_EVIDENCE_FOUND, ніж слабкі або дубльовані джерела.
 3. Прийнятні джерела: конкретні статті великих медіа, офіційні заяви/документи урядів або міжнародних організацій, авторитетні think tanks, профільні безпекові інститути.
 4. Заборонено включати як evidence:
@@ -190,8 +244,8 @@ latest_rationale: {latest.rationale}
    - якщо це переказ уже внесеної статті або того самого wire-story, не включай;
    - якщо все ж включаєш старіший матеріал як missed_baseline_evidence, duplicate_risk має бути high і треба чітко пояснити, чому він важливий.
 6. Freshness rule:
-   - за замовчуванням включай тільки матеріали після last_assessed_at;
-   - матеріали до last_assessed_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
+   - за замовчуванням включай тільки матеріали після search_after_at;
+   - матеріали до або на search_after_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
 7. Assessment rule:
    - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
    - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
@@ -330,11 +384,12 @@ def main(argv: list[str]) -> int:
     try:
         event = load_event(conn, args.event_id)
         latest = load_latest_assessment(conn, args.event_id)
+        search_after_at = load_search_after_at(conn, args.event_id, latest.assessed_at)
         evidence_lines = load_evidence_lines(conn, args.event_id, args.evidence_limit)
     finally:
         conn.close()
 
-    prompt = build_prompt(event, latest, evidence_lines)
+    prompt = build_prompt(event, latest, evidence_lines, search_after_at)
     prompt_file = write_prompt(prompt_dir, args.event_id, prompt)
     print(f"prompt_file: {prompt_file}")
 
