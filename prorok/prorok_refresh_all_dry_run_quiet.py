@@ -37,7 +37,7 @@ DEFAULT_START_AT = "2m"
 DEFAULT_SPACING_MINUTES = 3
 DEFAULT_LIMIT = 50
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_TOOLS = "tavily_search tavily_extract web_search web_fetch read"
+DEFAULT_TOOLS = "tavily_search tavily_extract web_fetch read"
 
 
 @dataclass(frozen=True)
