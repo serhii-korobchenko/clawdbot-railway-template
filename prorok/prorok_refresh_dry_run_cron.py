@@ -28,7 +28,7 @@ DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 DEFAULT_AT = "2m"
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_TOOLS = "tavily_search tavily_extract web_search web_fetch read"
+DEFAULT_TOOLS = "tavily_search tavily_extract web_fetch read"
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: lis
 - НЕ запускай /prorok add-evidence.
 - НЕ запускай /prorok assess.
 - НЕ вигадуй URL.
-- Використовуй web/tavily пошук. Tavily search є основним інструментом; web_search/web_fetch використовуй як fallback.
+- Для пошуку використовуй тільки tavily_search. tavily_extract і web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; web_search для PROROK refresh не використовуй.
 - Поверни тільки фінальний structured report українською мовою.
 
 Подія:
