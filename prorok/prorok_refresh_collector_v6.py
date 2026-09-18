@@ -323,7 +323,7 @@ def collect_one_v6(
     if parsed.outcome != "no_new_evidence" or parsed.candidates:
         return v5.collect_one_v5(conn, state_dir, row)
 
-    expected_time_range, baseline_assessed_at = v5._expected_tavily_time_range(
+    expected_time_range, search_boundary_at = v5._expected_tavily_time_range(
         conn,
         row,
     )
@@ -350,8 +350,8 @@ def collect_one_v6(
 
     transcript_sha256 = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
     boundary_suffix = (
-        f"; baseline_assessed_at={baseline_assessed_at}"
-        if baseline_assessed_at
+        f"; search_boundary_at={search_boundary_at}"
+        if search_boundary_at
         else ""
     )
     gate_error = f"search_quality_gate_v6_failed: {reason}{boundary_suffix}"

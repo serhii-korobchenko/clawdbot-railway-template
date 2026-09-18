@@ -57,43 +57,32 @@ def _expected_tavily_time_range(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
 ) -> tuple[str | None, str | None]:
-    """Return the deterministic coarse Tavily range and baseline timestamp."""
-    assessment_id = row["baseline_assessment_id"]
-    if assessment_id is None:
+    """Return deterministic Tavily range and the operational search boundary."""
+    try:
+        search_boundary = v4.base.resolve_search_boundary_datetime(conn, row)
+    except v4.base.RefreshParseError:
         return None, None
 
-    assessment = conn.execute(
-        """
-        SELECT assessed_at
-        FROM assessments
-        WHERE assessment_id = ?
-          AND event_id = ?
-        """,
-        (assessment_id, row["event_id"]),
-    ).fetchone()
-    if assessment is None:
-        return None, None
-
-    assessed_at_raw = assessment["assessed_at"]
-    assessed_at = _parse_datetime(assessed_at_raw)
-    if assessed_at is None:
-        return None, str(assessed_at_raw or "")
+    boundary_raw = (
+        search_boundary.isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
     reference = _parse_datetime(row["expected_run_at"]) or datetime.now(timezone.utc)
-    if assessed_at > reference:
-        return None, str(assessed_at_raw or "")
+    if search_boundary > reference:
+        return None, boundary_raw
 
-    age_days = (reference.date() - assessed_at.date()).days
+    age_days = (reference.date() - search_boundary.date()).days
 
     if age_days <= 1:
-        return "day", str(assessed_at_raw or "")
+        return "day", boundary_raw
     if age_days <= 7:
-        return "week", str(assessed_at_raw or "")
+        return "week", boundary_raw
     if age_days <= 31:
-        return "month", str(assessed_at_raw or "")
+        return "month", boundary_raw
     if age_days <= 365:
-        return "year", str(assessed_at_raw or "")
-    return None, str(assessed_at_raw or "")
+        return "year", boundary_raw
+    return None, boundary_raw
 
 
 def _extract_search_calls(session_path: Path) -> list[dict[str, Any]]:
@@ -256,7 +245,7 @@ def collect_one_v5(
     if parsed.outcome != "no_new_evidence" or parsed.candidates:
         return v4.collect_one_v4(conn, state_dir, row)
 
-    expected_time_range, baseline_assessed_at = _expected_tavily_time_range(conn, row)
+    expected_time_range, search_boundary_at = _expected_tavily_time_range(conn, row)
     valid, reason = _evaluate_v5_search_quality(calls, expected_time_range)
     search_call_count, distinct_search_query_count = _search_metrics(calls)
 
@@ -277,8 +266,8 @@ def collect_one_v5(
 
     transcript_sha256 = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
     boundary_suffix = (
-        f"; baseline_assessed_at={baseline_assessed_at}"
-        if baseline_assessed_at
+        f"; search_boundary_at={search_boundary_at}"
+        if search_boundary_at
         else ""
     )
     gate_error = f"search_quality_gate_v5_failed: {reason}{boundary_suffix}"

@@ -97,7 +97,7 @@ def collect_one_v8(
         # Preserve the established parser/source failure handling.
         return v7.collect_one_v7(conn, state_dir, row)
 
-    expected_time_range, baseline_assessed_at = (
+    expected_time_range, search_boundary_at = (
         v7.v6.v5._expected_tavily_time_range(conn, row)
     )
     valid, reason, calls = _evaluate_v8_search_quality(
@@ -137,8 +137,8 @@ def collect_one_v8(
     ).hexdigest()
 
     boundary_suffix = (
-        f"; baseline_assessed_at={baseline_assessed_at}"
-        if baseline_assessed_at
+        f"; search_boundary_at={search_boundary_at}"
+        if search_boundary_at
         else ""
     )
     gate_error = (
