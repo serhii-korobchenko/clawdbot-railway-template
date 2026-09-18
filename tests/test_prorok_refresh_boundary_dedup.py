@@ -41,7 +41,9 @@ def make_boundary_db() -> sqlite3.Connection:
             baseline_assessment_id INTEGER,
             job_state TEXT,
             cron_status TEXT,
-            cron_run_at_ms INTEGER
+            cron_run_at_ms INTEGER,
+            outcome TEXT,
+            search_quality_valid INTEGER
         );
 
         CREATE TABLE refresh_user_decisions(
@@ -59,18 +61,18 @@ def make_boundary_db() -> sqlite3.Connection:
         """
         INSERT INTO refresh_event_results(
             refresh_event_result_id,event_id,baseline_assessment_id,
-            job_state,cron_status,cron_run_at_ms
+            job_state,cron_status,cron_run_at_ms,outcome,search_quality_valid
         )
-        VALUES(107,'event_a',16,'completed','ok',1789724943233)
+        VALUES(107,'event_a',16,'completed','ok',1789724943233,'new_evidence',1)
         """
     )
     conn.execute(
         """
         INSERT INTO refresh_event_results(
             refresh_event_result_id,event_id,baseline_assessment_id,
-            job_state,cron_status,cron_run_at_ms
+            job_state,cron_status,cron_run_at_ms,outcome,search_quality_valid
         )
-        VALUES(110,'event_a',16,'completed','ok',1789733889249)
+        VALUES(110,'event_a',16,'completed','ok',1789733889249,'new_evidence',1)
         """
     )
     conn.execute(
@@ -101,6 +103,93 @@ def test_finalized_refresh_run_start_advances_search_boundary() -> None:
         resolved = resolve_search_boundary_datetime(conn, row)
         assert resolved.tzinfo == timezone.utc
         assert resolved.isoformat() == "2026-09-18T09:49:03.233000+00:00"
+    finally:
+        conn.close()
+
+
+def test_valid_no_new_evidence_advances_search_boundary_without_decision() -> None:
+    conn = make_boundary_db()
+    try:
+        conn.execute(
+            """
+            INSERT INTO refresh_event_results(
+                refresh_event_result_id,event_id,baseline_assessment_id,
+                job_state,cron_status,cron_run_at_ms,outcome,search_quality_valid
+            )
+            VALUES(
+                111,'event_a',16,'completed','ok',1789745443321,
+                'no_new_evidence',1
+            )
+            """
+        )
+        conn.commit()
+
+        boundary = load_search_after_at(
+            conn,
+            "event_a",
+            "2026-09-09T21:03:01Z",
+        )
+        assert boundary == "2026-09-18T15:30:43.321Z"
+
+        row = conn.execute(
+            "SELECT * FROM refresh_event_results WHERE refresh_event_result_id = 111"
+        ).fetchone()
+        resolved = resolve_search_boundary_datetime(conn, row)
+        assert resolved.isoformat() == "2026-09-18T15:30:43.321000+00:00"
+    finally:
+        conn.close()
+
+
+def test_undecided_new_evidence_does_not_advance_search_boundary() -> None:
+    conn = make_boundary_db()
+    try:
+        conn.execute("DELETE FROM refresh_user_decisions")
+        conn.commit()
+
+        boundary = load_search_after_at(
+            conn,
+            "event_a",
+            "2026-09-09T21:03:01Z",
+        )
+        assert boundary == "2026-09-09T21:03:01Z"
+
+        row = conn.execute(
+            "SELECT * FROM refresh_event_results WHERE refresh_event_result_id = 110"
+        ).fetchone()
+        resolved = resolve_search_boundary_datetime(conn, row)
+        assert resolved.isoformat() == "2026-09-09T21:03:01+00:00"
+    finally:
+        conn.close()
+
+
+def test_search_boundary_falls_back_to_assessment_when_no_safe_refresh_exists() -> None:
+    conn = make_boundary_db()
+    try:
+        conn.execute("DELETE FROM refresh_user_decisions")
+        conn.execute("DELETE FROM refresh_event_results")
+        conn.execute(
+            """
+            INSERT INTO refresh_event_results(
+                refresh_event_result_id,event_id,baseline_assessment_id,
+                job_state,cron_status,cron_run_at_ms,outcome,search_quality_valid
+            )
+            VALUES(200,'event_a',16,'scheduled',NULL,NULL,NULL,NULL)
+            """
+        )
+        conn.commit()
+
+        boundary = load_search_after_at(
+            conn,
+            "event_a",
+            "2026-09-09T21:03:01Z",
+        )
+        assert boundary == "2026-09-09T21:03:01Z"
+
+        row = conn.execute(
+            "SELECT * FROM refresh_event_results WHERE refresh_event_result_id = 200"
+        ).fetchone()
+        resolved = resolve_search_boundary_datetime(conn, row)
+        assert resolved.isoformat() == "2026-09-09T21:03:01+00:00"
     finally:
         conn.close()
 

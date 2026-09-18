@@ -21,6 +21,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
+except ImportError:  # direct script execution from /app/prorok
+    from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
+
 
 DEFAULT_DB_PATH = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_PROMPT_DIR = Path("/data/workspace/prorok/refresh_prompts")
@@ -116,50 +121,15 @@ def load_latest_assessment(conn: sqlite3.Connection, event_id: str) -> Assessmen
     )
 
 
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (name,),
-    ).fetchone() is not None
-
-
-def _epoch_ms_to_utc_iso(value: int) -> str:
-    dt = datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
-    return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
 def load_search_after_at(
     conn: sqlite3.Connection,
     event_id: str,
     fallback_assessed_at: str,
 ) -> str:
-    """Resolve the search boundary from the latest finalized refresh run start.
-
-    A finalized refresh advances evidence-search coverage even when the explicit
-    user decision was keep_current and therefore created no new assessment.
-    Older schemas/prompts fall back to the latest official assessment timestamp.
-    """
-    required = ("refresh_user_decisions", "refresh_event_results")
-    if all(_table_exists(conn, table) for table in required):
-        row = conn.execute(
-            """
-            SELECT rer.cron_run_at_ms
-            FROM refresh_user_decisions rud
-            JOIN refresh_event_results rer
-              ON rer.refresh_event_result_id = rud.refresh_event_result_id
-            WHERE rud.event_id_snapshot = ?
-              AND rer.event_id = ?
-              AND rer.job_state = 'completed'
-              AND rer.cron_status = 'ok'
-              AND rer.cron_run_at_ms IS NOT NULL
-            ORDER BY rud.decided_at DESC, rud.decision_id DESC
-            LIMIT 1
-            """,
-            (event_id, event_id),
-        ).fetchone()
-        if row is not None and row["cron_run_at_ms"] is not None:
-            return _epoch_ms_to_utc_iso(int(row["cron_run_at_ms"]))
-
+    """Resolve the latest safe refresh boundary, else official assessment time."""
+    boundary = latest_safe_refresh_boundary_datetime(conn, event_id)
+    if boundary is not None:
+        return boundary.isoformat(timespec="milliseconds").replace("+00:00", "Z")
     return fallback_assessed_at or "n/a"
 
 

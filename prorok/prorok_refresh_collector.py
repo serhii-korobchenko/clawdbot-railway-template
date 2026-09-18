@@ -27,9 +27,11 @@ from urllib.parse import urlparse
 
 try:
     from .prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
+    from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
     from .prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 except ImportError:  # direct script execution from /app/prorok
     from prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
+    from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
     from prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
@@ -343,31 +345,10 @@ def resolve_search_boundary_datetime(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
 ) -> datetime:
-    """Use the latest finalized refresh run start, else the baseline assessment."""
-    required = ("refresh_user_decisions", "refresh_event_results")
-    if all(_table_exists(conn, table) for table in required):
-        finalized = conn.execute(
-            """
-            SELECT rer.cron_run_at_ms
-            FROM refresh_user_decisions rud
-            JOIN refresh_event_results rer
-              ON rer.refresh_event_result_id = rud.refresh_event_result_id
-            WHERE rud.event_id_snapshot = ?
-              AND rer.event_id = ?
-              AND rer.job_state = 'completed'
-              AND rer.cron_status = 'ok'
-              AND rer.cron_run_at_ms IS NOT NULL
-            ORDER BY rud.decided_at DESC, rud.decision_id DESC
-            LIMIT 1
-            """,
-            (row["event_id"], row["event_id"]),
-        ).fetchone()
-        if finalized is not None and finalized["cron_run_at_ms"] is not None:
-            return datetime.fromtimestamp(
-                int(finalized["cron_run_at_ms"]) / 1000,
-                tz=timezone.utc,
-            )
-
+    """Use the latest safe refresh run start, else the baseline assessment."""
+    boundary = latest_safe_refresh_boundary_datetime(conn, str(row["event_id"]))
+    if boundary is not None:
+        return boundary
     return resolve_baseline_datetime(conn, row)
 
 
