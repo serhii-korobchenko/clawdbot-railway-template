@@ -156,8 +156,8 @@ def _verification_urls(args: dict[str, Any]) -> set[str]:
 def _undated_verification_targets(
     core_calls: list[dict[str, Any]],
     result_payloads: dict[str, dict[str, Any]],
-) -> tuple[set[str], list[str]]:
-    targets: set[str] = set()
+) -> tuple[dict[str, int], list[str]]:
+    targets: dict[str, int] = {}
     errors: list[str] = []
 
     for index, call in enumerate(core_calls, start=1):
@@ -191,7 +191,10 @@ def _undated_verification_targets(
             if isinstance(published, str) and published.strip():
                 continue
 
-            targets.add(url)
+            targets[url] = min(
+                targets.get(url, int(call.get("sequence") or 0)),
+                int(call.get("sequence") or 0),
+            )
             selected += 1
 
     return targets, errors
@@ -236,7 +239,7 @@ def _evaluate_v6_search_quality(
         errors.append(
             "unable to correlate first 3 search calls with transcript tool results"
         )
-        verification_targets: set[str] = set()
+        verification_targets: dict[str, int] = {}
     else:
         verification_targets, target_errors = _undated_verification_targets(
             trace_core,
@@ -244,19 +247,19 @@ def _evaluate_v6_search_quality(
         )
         errors.extend(target_errors)
 
-    verified_urls: set[str] = set()
-    if trace_core:
-        after_sequence = max(int(call.get("sequence") or 0) for call in trace_core)
-    else:
-        after_sequence = 0
+    verified_after: dict[str, int] = {}
 
     for call in verification_calls:
-        if int(call.get("sequence") or 0) <= after_sequence:
-            continue
+        call_sequence = int(call.get("sequence") or 0)
         args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        verified_urls.update(_verification_urls(args))
+        for url in _verification_urls(args):
+            verified_after[url] = max(verified_after.get(url, 0), call_sequence)
 
-    missing_verification = sorted(verification_targets - verified_urls)
+    missing_verification = sorted(
+        url
+        for url, required_after_sequence in verification_targets.items()
+        if verified_after.get(url, 0) <= required_after_sequence
+    )
     if missing_verification:
         preview = ", ".join(missing_verification[:3])
         if len(missing_verification) > 3:
