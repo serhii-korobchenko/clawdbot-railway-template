@@ -8,6 +8,7 @@ const API_TOKEN = process.env.PROROK_API_TOKEN || "";
 const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
+const EVENT_LIST_PAGE_SIZE = 8;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
 const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
@@ -88,6 +89,19 @@ async function activeEvents() {
   return Array.isArray(data.items) ? data.items : [];
 }
 
+async function archivedEvents() {
+  const data = await apiGet("/api/v1/events?status=archived");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+function eventStatusIcon(status) {
+  if (status === "active") return "🟢";
+  if (status === "paused") return "⏸";
+  if (status === "resolved") return "✅";
+  if (status === "archived") return "🗂";
+  return "•";
+}
+
 async function resolveEventId(token, { activeOnly = false } = {}) {
   const items = activeOnly ? await activeEvents() : await allEvents();
   const matches = items.filter((event) => eventToken(event.event_id) === token);
@@ -164,36 +178,51 @@ async function eventPresentation(eventId) {
   const confidence = current?.confidence || "—";
   const horizon = event.forecast_horizon || "—";
   const token = eventToken(event.event_id);
+  const blocks = [
+    textBlock(event.question),
+    textBlock(
+      [
+        `Ймовірність: ${probability}`,
+        `Впевненість: ${confidence}`,
+        `Горизонт: ${horizon}`,
+        `Статус: ${event.status}`,
+        `Assessment: ${data.assessments?.length ?? 0}`,
+        `Evidence: ${data.evidence?.length ?? 0}`,
+      ].join("\n"),
+    ),
+  ];
 
-  return {
-    title: event.title,
-    tone: "neutral",
-    blocks: [
-      textBlock(event.question),
-      textBlock(
-        [
-          `Ймовірність: ${probability}`,
-          `Впевненість: ${confidence}`,
-          `Горизонт: ${horizon}`,
-          `Статус: ${event.status}`,
-          `Assessment: ${data.assessments?.length ?? 0}`,
-          `Evidence: ${data.evidence?.length ?? 0}`,
-        ].join("\n"),
-      ),
-      buttonsBlock([
-        button("🎯 Рекомендація", `recommendation:${token}`, "primary"),
-        button("🧾 Evidence", `event-evidence:${token}`),
-        button("📈 Історія", `event-history:${token}`),
-      ]),
-      buttonsBlock([
-        button("🗑 Видалити подію", `delete-event:${token}`, "danger"),
-      ]),
-      buttonsBlock([
-        button("◀️ До прогнозів", "events"),
-        button("🏠 Головне меню", "home"),
-      ]),
-    ],
-  };
+  const detailButtons = [];
+  if (event.status === "active") {
+    detailButtons.push(button("🎯 Рекомендація", `recommendation:${token}`, "primary"));
+  }
+  detailButtons.push(
+    button("🧾 Evidence", `event-evidence:${token}`),
+    button("📈 Історія", `event-history:${token}`),
+  );
+  blocks.push(buttonsBlock(detailButtons));
+
+  blocks.push(
+    buttonsBlock([
+      button("🗑 Видалити подію", `delete-event:${token}`, "danger"),
+    ]),
+  );
+
+  const back =
+    event.status === "archived"
+      ? { label: "◀️ До архіву", payload: "archive" }
+      : event.status === "active"
+        ? { label: "◀️ До прогнозів", payload: "events" }
+        : { label: "◀️ До керування", payload: "manage-events:0" };
+
+  blocks.push(
+    buttonsBlock([
+      button(back.label, back.payload),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: event.title, tone: "neutral", blocks };
 }
 
 function recommendationStatusLabel(status) {
@@ -267,7 +296,7 @@ async function recommendationPresentation(eventId) {
 
   blocks.push(
     buttonsBlock([
-      button("◀️ До події", `event:${token}`),
+      button("◀️ До події", `event-any:${token}`),
       button("📊 До прогнозів", "events"),
     ]),
   );
@@ -344,7 +373,7 @@ async function appliedDecisionPresentation(eventId, expectedResultId, decisionTy
         textBlock(`${problem}\n\nЖодних змін не виконано.`),
         buttonsBlock([
           button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
-          button("◀️ До події", `event:${token}`),
+          button("◀️ До події", `event-any:${token}`),
         ]),
       ],
     };
@@ -367,7 +396,7 @@ async function appliedDecisionPresentation(eventId, expectedResultId, decisionTy
         ),
         buttonsBlock([
           button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
-          button("◀️ До події", `event:${token}`),
+          button("◀️ До події", `event-any:${token}`),
         ]),
       ],
     };
@@ -399,7 +428,7 @@ async function appliedDecisionPresentation(eventId, expectedResultId, decisionTy
       ),
       buttonsBlock([
         button("🎯 Переглянути рекомендацію", `recommendation:${token}`),
-        button("◀️ До події", `event:${token}`, "primary"),
+        button("◀️ До події", `event-any:${token}`, "primary"),
       ]),
     ],
   };
@@ -812,7 +841,7 @@ async function eventEvidencePresentation(eventId) {
 
   blocks.push(
     buttonsBlock([
-      button("◀️ До події", `event:${token}`),
+      button("◀️ До події", `event-any:${token}`),
       button("📊 До прогнозів", "events"),
     ]),
   );
@@ -847,7 +876,7 @@ async function eventHistoryPresentation(eventId) {
 
   blocks.push(
     buttonsBlock([
-      button("◀️ До події", `event:${token}`),
+      button("◀️ До події", `event-any:${token}`),
       button("📊 До прогнозів", "events"),
     ]),
   );
@@ -933,15 +962,165 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
   return { title: "🧾 Evidence", tone: "neutral", blocks };
 }
 
-function placeholderPresentation(title) {
+function refreshOutcomeLabel(outcome) {
+  if (outcome === "no_new_evidence") return "нових evidence немає";
+  if (outcome === "new_evidence") return "знайдено нові evidence";
+  if (outcome === "execution_failed") return "помилка виконання";
+  if (outcome === "parse_failed") return "помилка обробки";
+  return String(outcome || "невідомо");
+}
+
+async function latestRefreshPresentation() {
+  const data = await apiGet("/api/v1/refresh/latest");
+  const refresh = data.refresh;
+  const results = Array.isArray(data.results) ? data.results : [];
+  const blocks = [];
+
+  if (!refresh) {
+    blocks.push(textBlock("Історії refresh поки немає."));
+  } else {
+    blocks.push(
+      textBlock(
+        [
+          `Refresh #${refresh.refresh_id} · ${refresh.status}`,
+          `Початок: ${refresh.started_at || "—"}`,
+          `Завершення: ${refresh.finished_at || "—"}`,
+          `Перевірено подій: ${refresh.events_checked}`,
+          `Подій з новими evidence: ${refresh.events_with_new_evidence}`,
+          `Нових evidence: ${refresh.new_evidence_count}`,
+          `Рекомендацій: ${refresh.recommendations_count}`,
+          `Без зміни: ${refresh.no_change_count}`,
+          `Помилок: ${refresh.error_count}`,
+        ].join("\n"),
+      ),
+    );
+
+    for (const item of results.slice(0, 8)) {
+      const forecastLine =
+        item.recommended_probability === null || item.recommended_probability === undefined
+          ? `Прогноз: ${item.current_probability ?? item.baseline_probability ?? "—"}%`
+          : `Прогноз: ${item.baseline_probability ?? "—"}% → ${item.recommended_probability}%`;
+      const decisionLine = item.decision
+        ? `Рішення: ${item.decision.decision_type} → ${item.decision.selected_probability}%`
+        : null;
+      blocks.push(
+        textBlock(
+          [
+            shortText(item.event_title_snapshot || item.event_id || "Подія", 180),
+            `Результат: ${refreshOutcomeLabel(item.outcome)}`,
+            `Evidence: +${item.new_evidence_count} · 🟢 ${item.indicator_count} · 🔴 ${item.counterindicator_count}`,
+            forecastLine,
+            decisionLine,
+          ].filter(Boolean).join("\n"),
+        ),
+      );
+    }
+
+    if (results.length > 8) {
+      blocks.push(textBlock(`Показано 8 з ${results.length} результатів.`));
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("↻ Оновити", "refresh"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+  return { title: "🔄 Останнє оновлення", tone: "neutral", blocks };
+}
+
+async function archivePresentation(page = 0) {
+  const items = await archivedEvents();
+  const maxPage = Math.max(0, Math.ceil(items.length / EVENT_LIST_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * EVENT_LIST_PAGE_SIZE;
+  const pageItems = items.slice(start, start + EVENT_LIST_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Архівних прогнозів: ${items.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+  ];
+
+  if (!pageItems.length) {
+    blocks.push(textBlock("Архів порожній."));
+  } else {
+    for (const event of pageItems) {
+      const token = eventToken(event.event_id);
+      blocks.push(
+        buttonsBlock([
+          button(
+            `${event.current_assessment?.probability_percent ?? "—"}% · ${event.title}`.slice(0, 80),
+            `event-any:${token}`,
+          ),
+        ]),
+      );
+    }
+  }
+
+  const pager = [];
+  if (safePage > 0) pager.push(button("◀️ Попередня", `archive:${safePage - 1}`));
+  if (safePage < maxPage) pager.push(button("Наступна ▶️", `archive:${safePage + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+  blocks.push(buttonsBlock([button("🏠 Головне меню", "home")]));
+
+  return { title: "🗂 Архів", tone: "neutral", blocks };
+}
+
+function managePresentation() {
   return {
-    title,
+    title: "⚙️ Керування",
     tone: "neutral",
     blocks: [
-      textBlock("Цей розділ буде реалізований у наступних кроках M2."),
-      buttonsBlock([button("◀️ Назад", "home")]),
+      textBlock(
+        "Керування використовує deterministic PROROK operations. Видалення події або evidence завжди має окремий екран підтвердження.",
+      ),
+      buttonsBlock([
+        button("🗂 Керування подіями", "manage-events:0", "primary"),
+        button("🧾 Керування evidence", "evidence:all:0"),
+        button("🎯 Рекомендації", "events"),
+      ]),
+      buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
+}
+
+async function manageEventsPresentation(page = 0) {
+  const items = await allEvents();
+  const maxPage = Math.max(0, Math.ceil(items.length / EVENT_LIST_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * EVENT_LIST_PAGE_SIZE;
+  const pageItems = items.slice(start, start + EVENT_LIST_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Подій: ${items.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+  ];
+
+  if (!pageItems.length) {
+    blocks.push(textBlock("Подій немає."));
+  } else {
+    for (const event of pageItems) {
+      const token = eventToken(event.event_id);
+      blocks.push(
+        buttonsBlock([
+          button(
+            `${eventStatusIcon(event.status)} ${event.current_assessment?.probability_percent ?? "—"}% · ${event.title}`.slice(0, 80),
+            `event-any:${token}`,
+          ),
+        ]),
+      );
+    }
+  }
+
+  const pager = [];
+  if (safePage > 0) pager.push(button("◀️ Попередня", `manage-events:${safePage - 1}`));
+  if (safePage < maxPage) pager.push(button("Наступна ▶️", `manage-events:${safePage + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До керування", "manage"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: "🗂 Керування подіями", tone: "neutral", blocks };
 }
 
 async function renderPayload(payload, ctx = null) {
@@ -1015,11 +1194,11 @@ async function renderPayload(payload, ctx = null) {
     return await appliedDecisionPresentation(eventId, resultId, "keep_current");
   }
   if (payload.startsWith("event-evidence:")) {
-    const eventId = await resolveEventId(payload.slice("event-evidence:".length), { activeOnly: true });
+    const eventId = await resolveEventId(payload.slice("event-evidence:".length));
     return await eventEvidencePresentation(eventId);
   }
   if (payload.startsWith("event-history:")) {
-    const eventId = await resolveEventId(payload.slice("event-history:".length), { activeOnly: true });
+    const eventId = await resolveEventId(payload.slice("event-history:".length));
     return await eventHistoryPresentation(eventId);
   }
   if (payload.startsWith("event-any:")) {
@@ -1030,9 +1209,19 @@ async function renderPayload(payload, ctx = null) {
     const eventId = await resolveEventId(payload.slice("event:".length), { activeOnly: true });
     return await eventPresentation(eventId);
   }
-  if (payload === "refresh") return placeholderPresentation("🔄 Останнє оновлення");
-  if (payload === "archive") return placeholderPresentation("🗂 Архів");
-  if (payload === "manage") return placeholderPresentation("⚙️ Керування");
+  if (payload === "refresh") return await latestRefreshPresentation();
+  if (payload === "archive") return await archivePresentation(0);
+  if (payload.startsWith("archive:")) {
+    const rawPage = payload.slice("archive:".length);
+    if (!/^\d+$/.test(rawPage)) throw new Error("Invalid PROROK archive page");
+    return await archivePresentation(Number.parseInt(rawPage, 10));
+  }
+  if (payload === "manage") return managePresentation();
+  if (payload.startsWith("manage-events:")) {
+    const rawPage = payload.slice("manage-events:".length);
+    if (!/^\d+$/.test(rawPage)) throw new Error("Invalid PROROK manage-events page");
+    return await manageEventsPresentation(Number.parseInt(rawPage, 10));
+  }
   return mainPresentation();
 }
 
