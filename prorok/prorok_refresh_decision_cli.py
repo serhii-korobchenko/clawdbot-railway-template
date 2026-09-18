@@ -5,18 +5,21 @@ This CLI is the deterministic write boundary for Telegram decision actions.
 It never asks an LLM to change an official forecast.
 
 Rules:
-- schema v5 or newer is required;
+- schema v8 or newer is required;
 - only completed, valid refresh recommendations may be decided;
 - the refresh baseline must still be the current official assessment;
 - one final decision is allowed per refresh_event_result_id;
+- every final decision promotes all quarantine-accepted refresh candidates into
+  official evidence;
 - accept/custom append an official assessment;
-- keep_current records the decision without creating an assessment;
-- assessment + decision + run metadata commit atomically.
+- keep_current promotes accepted evidence without creating an assessment;
+- evidence promotion + assessment + decision + run metadata commit atomically.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
@@ -24,9 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from prorok_evidence_cli import canonicalize_url
+
 DEFAULT_PROROK_HOME = "/data/workspace/prorok"
 DEFAULT_DB_NAME = "prorok.sqlite3"
-MIN_SCHEMA_VERSION = 5
+MIN_SCHEMA_VERSION = 8
 
 DECISION_ACCEPT = "accept_recommendation"
 DECISION_CUSTOM = "custom_probability"
@@ -97,7 +102,7 @@ def schema_version(conn: sqlite3.Connection) -> str | None:
     return None if row is None else str(row["value"])
 
 
-def require_schema_v5(conn: sqlite3.Connection) -> None:
+def require_schema_v8(conn: sqlite3.Connection) -> None:
     version = schema_version(conn)
     try:
         version_number = int(version) if version is not None else None
@@ -109,12 +114,26 @@ def require_schema_v5(conn: sqlite3.Connection) -> None:
         raise CliError(
             f"schema v{MIN_SCHEMA_VERSION}+ required; current schema_version={version!r}"
         )
-    table = fetch_one(
-        conn,
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='refresh_user_decisions'",
+
+    required_tables = (
+        "refresh_user_decisions",
+        "refresh_candidate_evidence",
+        "refresh_candidate_promotions",
     )
-    if table is None:
-        raise CliError("schema v5 table refresh_user_decisions is missing")
+    for table in required_tables:
+        row = fetch_one(
+            conn,
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        if row is None:
+            raise CliError(f"schema v8 table {table} is missing")
+
+    decision_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(refresh_user_decisions)")
+    }
+    if "run_id" not in decision_columns:
+        raise CliError("schema v8 column refresh_user_decisions.run_id is missing")
 
 
 def map_probability(probability: int) -> tuple[str, str]:
@@ -195,6 +214,7 @@ def load_existing_decision(
             decision_type,
             selected_probability,
             assessment_id,
+            run_id,
             decision_source,
             decided_at
         FROM refresh_user_decisions
@@ -202,6 +222,38 @@ def load_existing_decision(
         """,
         (refresh_event_result_id,),
     )
+
+
+def load_accepted_candidates(
+    conn: sqlite3.Connection,
+    refresh_event_result_id: int,
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT
+            candidate_id,
+            refresh_event_result_id,
+            ordinal,
+            direction,
+            strength,
+            relevance,
+            credibility,
+            title,
+            source,
+            url,
+            published_at,
+            summary,
+            why_it_matters,
+            duplicate_risk,
+            freshness,
+            validation_state
+        FROM refresh_candidate_evidence
+        WHERE refresh_event_result_id = ?
+          AND validation_state = 'accepted'
+        ORDER BY ordinal, candidate_id
+        """,
+        (refresh_event_result_id,),
+    ).fetchall()
 
 
 def validate_refresh_is_actionable(
@@ -239,6 +291,46 @@ def validate_refresh_is_actionable(
             f"baseline_probability={baseline_probability}, "
             f"current_probability={current_probability}"
         )
+
+
+def validate_candidate_for_promotion(candidate: sqlite3.Row) -> None:
+    candidate_id = int(candidate["candidate_id"])
+
+    if candidate["validation_state"] != "accepted":
+        raise CliError(
+            f"candidate_id={candidate_id} is not quarantine-accepted"
+        )
+
+    url = (candidate["url"] or "").strip()
+    if not url:
+        raise CliError(f"candidate_id={candidate_id} has no URL")
+
+    summary = (candidate["summary"] or "").strip()
+    if not summary:
+        raise CliError(f"candidate_id={candidate_id} has no summary")
+
+    direction = (candidate["direction"] or "").strip()
+    if direction not in {"indicator", "counterindicator", "neutral"}:
+        raise CliError(
+            f"candidate_id={candidate_id} has invalid direction={direction!r}"
+        )
+
+    strength = candidate["strength"]
+    if strength is not None and str(strength).strip() not in {
+        "weak",
+        "medium",
+        "strong",
+    }:
+        raise CliError(
+            f"candidate_id={candidate_id} has invalid strength={strength!r}"
+        )
+
+    for field in ("relevance", "credibility"):
+        value = candidate[field]
+        if value is not None and not 0 <= int(value) <= 100:
+            raise CliError(
+                f"candidate_id={candidate_id} has invalid {field}={value!r}"
+            )
 
 
 def resolve_selected_probability(
@@ -282,7 +374,7 @@ def create_run(
         VALUES ('manual_cli', 'running', ?)
         """,
         (
-            "Apply explicit PROROK refresh user decision "
+            "Finalize explicit PROROK refresh user decision "
             f"refresh_event_result_id={refresh_event_result_id} "
             f"decision_type={decision_type} source={source}",
         ),
@@ -290,17 +382,22 @@ def create_run(
     return int(cur.lastrowid)
 
 
-def finish_run(conn: sqlite3.Connection, run_id: int) -> None:
+def finish_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    new_sources_found: int,
+) -> None:
     conn.execute(
         """
         UPDATE runs
         SET finished_at = ?,
             status = 'completed',
             events_processed = 1,
-            new_sources_found = 0
+            new_sources_found = ?
         WHERE run_id = ?
         """,
-        (utc_now(), run_id),
+        (utc_now(), new_sources_found, run_id),
     )
 
 
@@ -326,7 +423,196 @@ def build_rationale(
     return text
 
 
-def print_existing_decision(existing: sqlite3.Row) -> None:
+def upsert_candidate_source(
+    conn: sqlite3.Connection,
+    candidate: sqlite3.Row,
+    *,
+    now: str,
+) -> tuple[int, bool]:
+    candidate_id = int(candidate["candidate_id"])
+    raw_url = str(candidate["url"]).strip()
+    canonical_url, canonical_hash, domain = canonicalize_url(raw_url)
+
+    existed = fetch_one(
+        conn,
+        "SELECT source_id FROM sources WHERE canonical_url_hash = ?",
+        (canonical_hash,),
+    ) is not None
+
+    metadata = json.dumps(
+        {
+            "promotion": "refresh_user_decision",
+            "refresh_candidate_id": candidate_id,
+            "refresh_event_result_id": int(candidate["refresh_event_result_id"]),
+            "source_label": candidate["source"],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+    conn.execute(
+        """
+        INSERT INTO sources(
+            url,
+            canonical_url,
+            canonical_url_hash,
+            title,
+            domain,
+            published_at,
+            first_seen_at,
+            last_seen_at,
+            source_type,
+            raw_metadata
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'web', ?)
+        ON CONFLICT(canonical_url_hash) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at,
+            title = COALESCE(sources.title, excluded.title),
+            published_at = COALESCE(sources.published_at, excluded.published_at),
+            source_type = COALESCE(sources.source_type, excluded.source_type),
+            raw_metadata = COALESCE(sources.raw_metadata, excluded.raw_metadata)
+        """,
+        (
+            raw_url,
+            canonical_url,
+            canonical_hash,
+            candidate["title"],
+            domain,
+            candidate["published_at"],
+            now,
+            now,
+            metadata,
+        ),
+    )
+
+    source = fetch_one(
+        conn,
+        "SELECT source_id FROM sources WHERE canonical_url_hash = ?",
+        (canonical_hash,),
+    )
+    if source is None:
+        raise CliError(f"source upsert failed for candidate_id={candidate_id}")
+
+    return int(source["source_id"]), not existed
+
+
+def promote_candidate(
+    conn: sqlite3.Connection,
+    candidate: sqlite3.Row,
+    *,
+    event_id: str,
+    decision_id: int,
+    run_id: int,
+    now: str,
+) -> tuple[int, str, bool]:
+    validate_candidate_for_promotion(candidate)
+
+    candidate_id = int(candidate["candidate_id"])
+    source_id, new_source = upsert_candidate_source(
+        conn,
+        candidate,
+        now=now,
+    )
+
+    summary = str(candidate["summary"]).strip()
+    direction = str(candidate["direction"]).strip()
+    strength = (
+        None
+        if candidate["strength"] is None
+        else str(candidate["strength"]).strip()
+    )
+
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO evidence_items(
+            event_id,
+            source_id,
+            run_id,
+            direction,
+            strength,
+            summary,
+            relevance,
+            credibility,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            source_id,
+            run_id,
+            direction,
+            strength,
+            summary,
+            candidate["relevance"],
+            candidate["credibility"],
+            now,
+        ),
+    )
+
+    if cur.rowcount == 1:
+        evidence_id = int(cur.lastrowid)
+        promotion_action = "inserted"
+    else:
+        evidence = fetch_one(
+            conn,
+            """
+            SELECT evidence_id
+            FROM evidence_items
+            WHERE event_id = ?
+              AND source_id = ?
+              AND direction = ?
+              AND summary = ?
+            """,
+            (event_id, source_id, direction, summary),
+        )
+        if evidence is None:
+            raise CliError(
+                f"evidence deduplication lookup failed for candidate_id={candidate_id}"
+            )
+        evidence_id = int(evidence["evidence_id"])
+        promotion_action = "reused"
+
+    conn.execute(
+        """
+        INSERT INTO refresh_candidate_promotions(
+            candidate_id,
+            refresh_event_result_id,
+            decision_id,
+            evidence_id,
+            run_id,
+            promotion_action,
+            promoted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            candidate_id,
+            int(candidate["refresh_event_result_id"]),
+            decision_id,
+            evidence_id,
+            run_id,
+            promotion_action,
+            now,
+        ),
+    )
+
+    return evidence_id, promotion_action, new_source
+
+
+def print_existing_decision(
+    conn: sqlite3.Connection,
+    existing: sqlite3.Row,
+) -> None:
+    promotion_count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM refresh_candidate_promotions
+        WHERE decision_id = ?
+        """,
+        (int(existing["decision_id"]),),
+    ).fetchone()[0]
+
     print("OK: decision already applied")
     print(f"decision_id: {existing['decision_id']}")
     print(f"refresh_event_result_id: {existing['refresh_event_result_id']}")
@@ -337,6 +623,11 @@ def print_existing_decision(existing: sqlite3.Row) -> None:
         "assessment_id: "
         f"{existing['assessment_id'] if existing['assessment_id'] is not None else 'none'}"
     )
+    print(
+        "run_id: "
+        f"{existing['run_id'] if existing['run_id'] is not None else 'none'}"
+    )
+    print(f"promoted_candidates: {promotion_count}")
     print(f"decision_source: {existing['decision_source']}")
     print(f"decided_at: {existing['decided_at']}")
     print("idempotent_replay: true")
@@ -349,7 +640,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     with connect(db_path) as conn:
         try:
             conn.execute("BEGIN IMMEDIATE")
-            require_schema_v5(conn)
+            require_schema_v8(conn)
 
             refresh = load_refresh_result(conn, args.refresh_event_result_id)
             event_id = refresh["event_id"]
@@ -385,7 +676,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                         f"selected_probability={existing['selected_probability']}"
                     )
                 conn.rollback()
-                print_existing_decision(existing)
+                print_existing_decision(conn, existing)
                 return 0
 
             current = current_assessment(conn, str(event_id))
@@ -398,15 +689,22 @@ def cmd_apply(args: argparse.Namespace) -> int:
             # labels for the intentional gaps between defined ranges.
             band, label = map_probability(selected_probability)
 
-            assessment_id: int | None = None
+            accepted_candidates = load_accepted_candidates(
+                conn,
+                int(refresh["refresh_event_result_id"]),
+            )
+            for candidate in accepted_candidates:
+                validate_candidate_for_promotion(candidate)
 
+            run_id = create_run(
+                conn,
+                int(refresh["refresh_event_result_id"]),
+                args.decision,
+                args.source,
+            )
+
+            assessment_id: int | None = None
             if args.decision != DECISION_KEEP:
-                run_id = create_run(
-                    conn,
-                    args.refresh_event_result_id,
-                    args.decision,
-                    args.source,
-                )
                 previous_probability = int(current["probability_percent"])
                 delta = selected_probability - previous_probability
                 rationale = build_rationale(
@@ -444,7 +742,6 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     ),
                 )
                 assessment_id = int(cur.lastrowid)
-                finish_run(conn, run_id)
 
             cur = conn.execute(
                 """
@@ -457,10 +754,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     recommended_probability,
                     selected_probability,
                     assessment_id,
+                    run_id,
                     decision_source,
                     decided_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(refresh["refresh_event_result_id"]),
@@ -475,11 +773,40 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     ),
                     selected_probability,
                     assessment_id,
+                    run_id,
                     args.source,
                     now,
                 ),
             )
             decision_id = int(cur.lastrowid)
+
+            promoted_count = 0
+            inserted_evidence_count = 0
+            reused_evidence_count = 0
+            new_sources_found = 0
+
+            for candidate in accepted_candidates:
+                _evidence_id, action, new_source = promote_candidate(
+                    conn,
+                    candidate,
+                    event_id=str(event_id),
+                    decision_id=decision_id,
+                    run_id=run_id,
+                    now=now,
+                )
+                promoted_count += 1
+                if action == "inserted":
+                    inserted_evidence_count += 1
+                else:
+                    reused_evidence_count += 1
+                if new_source:
+                    new_sources_found += 1
+
+            finish_run(
+                conn,
+                run_id,
+                new_sources_found=new_sources_found,
+            )
 
             fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
             if fk_errors:
@@ -493,7 +820,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             conn.rollback()
             raise
 
-    print("OK: PROROK refresh decision applied")
+    print("OK: PROROK refresh decision finalized")
     print(f"decision_id: {decision_id}")
     print(f"refresh_event_result_id: {args.refresh_event_result_id}")
     print(f"event_id: {event_id}")
@@ -512,6 +839,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
         "assessment_id: "
         f"{assessment_id if assessment_id is not None else 'none'}"
     )
+    print(f"run_id: {run_id}")
+    print(f"accepted_candidates: {len(accepted_candidates)}")
+    print(f"promoted_candidates: {promoted_count}")
+    print(f"official_evidence_inserted: {inserted_evidence_count}")
+    print(f"official_evidence_reused: {reused_evidence_count}")
+    print(f"new_sources_found: {new_sources_found}")
     print(
         "confidence: "
         f"{current['confidence'] if current['confidence'] is not None else 'n/a'}"
@@ -533,7 +866,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     apply_cmd = sub.add_parser(
         "apply",
-        help="Atomically apply one final decision to a refresh result",
+        help="Atomically finalize one refresh decision and promote accepted evidence",
     )
     apply_cmd.add_argument(
         "refresh_event_result_id",
