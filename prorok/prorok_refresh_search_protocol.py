@@ -96,7 +96,7 @@ def _build_search_protocol(prompt: str) -> str:
    - виконай щонайменше 3 окремі search calls з різними query;
    - search #1: broad factual search за основним формулюванням події;
    - search #2: indicator search — шукай нові факти, що можуть підвищити probability;
-   - search #3: downside search — природною мовою шукай нові факти, що можуть знизити probability; НЕ використовуй у query внутрішні терміни counterindicator, counter-indicator або counter indicator;
+   - search #3: downside search — природною мовою шукай нові факти, що можуть знизити probability; НЕ використовуй у query внутрішні терміни counterindicator, counter-indicator або counter indicator; формулюй змістовно, наприклад: "signals suggesting Russia is unlikely to use nuclear weapons in Ukraine", "evidence of nuclear restraint", "absence of preparations for nuclear use" — адаптуй приклади до конкретної події, не копіюй їх механічно;
    - для кожного search #1, #2 і #3 використовуй tavily_search з topic: "news" та max_results: 7; topic=news потрібен, щоб Tavily за можливості повернув publication metadata;
    - {boundary_text};
    - {time_range_rule};
@@ -105,11 +105,11 @@ def _build_search_protocol(prompt: str) -> str:
    - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через tavily_extract (бажано одним batch-викликом) або web_fetch до фінального висновку;
    - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою last_assessed_at, підтвердь точну дату/час через сторінку джерела, tavily_extract або web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
    - матеріал із published ДО або НА межі last_assessed_at не є новим evidence; його можна розглядати лише окремо як missed_baseline_evidence, якщо він істотно змінює баланс оцінки;
-   - не використовуй псевдофільтри after:DATE або site:news у query; для доменних обмежень використовуй include_domains, якщо це справді потрібно;
-   - якщо будь-який із трьох search повернув 0 результатів, обов'язково переформулюй query і зроби додатковий search;
+   - НЕ використовуй after:DATE і НЕ використовуй жодний оператор site: у query; якщо потрібне доменне обмеження, передавай include_domains;
+   - якщо будь-який із search #1, #2 або #3 повернув 0 результатів, обов'язково ПІСЛЯ нього зроби додатковий tavily_search з іншим переформульованим query; retry також має використовувати topic: "news", max_results: 7, той самий time_range policy та не містити after:DATE або site:;
    - мова query має відповідати джерелам, які реально можуть висвітлювати тему; дозволено й бажано використовувати англійські, українські або російські формулювання залежно від теми;
    - окремо перевір авторитетні першоджерела, великі медіа, think tanks або профільні інститути, якщо broad search недостатній;
-   - NO_NEW_EVIDENCE_FOUND дозволено тільки після виконання search protocol та обов'язкової freshness verification для описаних вище результатів без published;
+   - NO_NEW_EVIDENCE_FOUND дозволено тільки після виконання search protocol, обов'язкових zero-result retries та freshness verification для описаних вище результатів без published;
    - не створюй candidate evidence лише для проходження цього правила: якщо після достатнього пошуку й перевірки якісних нових evidence немає, поверни NO_NEW_EVIDENCE_FOUND.
 """.strip()
 
