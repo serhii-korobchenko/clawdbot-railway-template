@@ -105,10 +105,14 @@ def _build_search_protocol(prompt: str) -> str:
    - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через tavily_extract (бажано одним batch-викликом) або web_fetch до фінального висновку;
    - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою last_assessed_at, підтвердь точну дату/час через сторінку джерела, tavily_extract або web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
    - матеріал із published ДО або НА межі last_assessed_at не є новим evidence; його можна розглядати лише окремо як missed_baseline_evidence, якщо він істотно змінює баланс оцінки;
-   - НЕ використовуй after:DATE у query; також не використовуй search-engine domain qualifiers усередині query; якщо потрібне доменне обмеження, передавай його тільки через include_domains;
-   - якщо будь-який із search #1, #2 або #3 повернув 0 результатів, обов'язково ПІСЛЯ нього зроби додатковий tavily_search з іншим переформульованим query; retry також має використовувати topic: "news", max_results: 7, той самий time_range policy та не містити after:DATE або search-engine domain qualifiers;
+   - правило чистоти query застосовується ДО КОЖНОГО tavily_search call без винятків: до search #1/#2/#3, zero-result retry, authority/source-specific checks і будь-яких додаткових пошуків;
+   - поле query має містити тільки природномовні тематичні слова; НЕ вставляй у query URL, hostname/domain name або будь-який search-engine field qualifier у форматі key:value;
+   - НЕ використовуй after:DATE у query; часову межу задавай тільки через time_range та подальшу перевірку published;
+   - якщо потрібно обмежити пошук конкретним джерелом або доменом, використовуй ТІЛЬКИ параметр include_domains і залишай query без доменного імені; приклади: Reuters -> include_domains: ["reuters.com"], AP -> include_domains: ["apnews.com"], ISW -> include_domains: ["understandingwar.org"];
+   - перед КОЖНИМ tavily_search виконай внутрішній parameter self-check: query не повинен містити URL/hostname/domain token, конструкцію з двокрапкою як search qualifier або інший search-engine operator; якщо містить — перепиши query природною мовою ДО виклику tool;
+   - якщо будь-який із search #1, #2 або #3 повернув 0 результатів, обов'язково ПІСЛЯ нього зроби додатковий tavily_search з іншим переформульованим query; retry також має використовувати topic: "news", max_results: 7, той самий time_range policy та пройти той самий parameter self-check;
    - мова query має відповідати джерелам, які реально можуть висвітлювати тему; дозволено й бажано використовувати англійські, українські або російські формулювання залежно від теми;
-   - окремо перевір авторитетні першоджерела, великі медіа, think tanks або профільні інститути, якщо broad search недостатній;
+   - окремо перевір авторитетні першоджерела, великі медіа, think tanks або профільні інститути, якщо broad search недостатній; source-specific check теж повинен використовувати include_domains, а не доменне ім'я або search qualifier у query;
    - NO_NEW_EVIDENCE_FOUND дозволено тільки після виконання search protocol, обов'язкових zero-result retries та freshness verification для описаних вище результатів без published;
    - не створюй candidate evidence лише для проходження цього правила: якщо після достатнього пошуку й перевірки якісних нових evidence немає, поверни NO_NEW_EVIDENCE_FOUND.
 """.strip()
