@@ -90,15 +90,18 @@
       return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
     };
 
+    const isMobile = window.matchMedia("(max-width: 760px)").matches;
     const wrapper = canvas.closest(".activity-chart-wrap");
     if (wrapper) {
-      wrapper.style.height = `${Math.max(320, points.length * 54)}px`;
+      const rowHeight = isMobile ? 44 : 54;
+      const minHeight = isMobile ? 280 : 320;
+      wrapper.style.height = `${Math.max(minHeight, points.length * rowHeight)}px`;
     }
 
     new Chart(canvas, {
       type: "bar",
       data: {
-        labels: points.map((point) => truncate(point.title)),
+        labels: points.map((point) => point.title),
         datasets: [{
           label: "Evidence",
           data: points.map((point) => point.evidence_count),
@@ -122,6 +125,12 @@
           y: {
             ticks: {
               autoSkip: false,
+              callback(value, index) {
+                if (isMobile) {
+                  return String(index + 1);
+                }
+                return truncate(this.getLabelForValue(value));
+              },
             },
           },
         },

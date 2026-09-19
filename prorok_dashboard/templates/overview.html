@@ -99,6 +99,17 @@
     <div id="activity-chart-data" data-points='{{ activity_points|tojson|forceescape }}'></div>
     <canvas id="evidence-activity-chart" aria-label="Кількість evidence по активних подіях"></canvas>
   </div>
+  <ol class="activity-mobile-list" aria-label="Активність по активних подіях">
+    {% for point in activity_points %}
+    <li>
+      <a class="activity-mobile-item" href="/events/{{ point.event_id }}">
+        <span class="activity-mobile-number">{{ loop.index }}</span>
+        <span class="activity-mobile-title">{{ point.title }}</span>
+        <strong>{{ point.evidence_count }} evidence</strong>
+      </a>
+    </li>
+    {% endfor %}
+  </ol>
   {% else %}
   <p class="empty-copy">Активних подій немає.</p>
   {% endif %}

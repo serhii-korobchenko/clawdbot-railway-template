@@ -73,10 +73,16 @@ def test_overview_shows_evidence_activity_chart(logged_in_client):
     assert "Накопичена кількість official evidence" in response.text
     assert 'id="activity-chart-data"' in response.text
     assert 'id="evidence-activity-chart"' in response.text
+    assert 'class="activity-mobile-list"' in response.text
+    assert 'class="activity-mobile-number">1<' in response.text
+    assert "1 evidence" in response.text
     assert "Test event" in response.text
 
     script = logged_in_client.get("/static/js/dashboard.js")
     assert script.status_code == 200
     assert "renderEvidenceActivityChart" in script.text
     assert 'indexAxis: "y"' in script.text
+    assert 'window.matchMedia("(max-width: 760px)")' in script.text
+    assert "return String(index + 1)" in script.text
+    assert "this.getLabelForValue(value)" in script.text
     assert "Кількість official evidence" in script.text
