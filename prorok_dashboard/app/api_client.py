@@ -122,6 +122,12 @@ class ProrokApiClient:
             params["q"] = q
         return await self._get("/api/v1/evidence", params=params)
 
+    async def get_evidence_activity(self, *, status: str = "active", window: str = "7d") -> dict[str, Any]:
+        return await self._get(
+            "/api/v1/evidence/activity",
+            params={"status": status, "window": window},
+        )
+
     async def list_candidate_evidence(
         self,
         *,

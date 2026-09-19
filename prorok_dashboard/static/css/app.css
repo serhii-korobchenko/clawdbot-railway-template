@@ -72,6 +72,9 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 #probability-chart { min-height: 280px; max-height: 310px; }
 .activity-chart-wrap { position: relative; min-height: 320px; margin-top: 16px; }
 #evidence-activity-chart { width: 100%; min-height: 300px; }
+.activity-window-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.activity-window-tab { text-decoration: none; border: 1px solid var(--border); background: var(--surface-muted); border-radius: 999px; padding: 7px 11px; font-size: .9rem; }
+.activity-window-tab.is-active { border-color: var(--text); background: var(--surface); font-weight: 750; }
 .activity-mobile-list { display: none; list-style: none; margin: 18px 0 0; padding: 0; }
 .activity-mobile-item { text-decoration: none; }
 .compact-meta, .mapping-list { margin: 18px 0 0; }
@@ -159,7 +162,9 @@ code { font-size: .88em; overflow-wrap: anywhere; }
     font-weight: 800;
     font-variant-numeric: tabular-nums;
   }
+  .activity-mobile-copy { min-width: 0; display: grid; gap: 4px; }
   .activity-mobile-title { min-width: 0; line-height: 1.35; }
+  .activity-mobile-meta { color: var(--text-muted); font-size: .8rem; line-height: 1.35; }
   .activity-mobile-item strong {
     white-space: nowrap;
     font-size: .88rem;

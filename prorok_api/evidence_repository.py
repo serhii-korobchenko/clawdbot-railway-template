@@ -1,7 +1,75 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+
+_ACTIVITY_WINDOWS = {"7d": timedelta(days=7), "30d": timedelta(days=30), "all": None}
+
+
+def _iso_utc(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def evidence_activity(conn: sqlite3.Connection, *, status: str = "active", window: str = "7d", now: datetime | None = None) -> dict[str, Any]:
+    if window not in _ACTIVITY_WINDOWS:
+        raise ValueError(f"Unsupported evidence activity window: {window}")
+    generated = now or datetime.now(timezone.utc)
+    if generated.tzinfo is None:
+        generated = generated.replace(tzinfo=timezone.utc)
+    generated = generated.astimezone(timezone.utc)
+    duration = _ACTIVITY_WINDOWS[window]
+    cutoff = generated - duration if duration is not None else None
+
+    join_filter = ""
+    params: list[Any] = []
+    if cutoff is not None:
+        join_filter = " AND julianday(ei.created_at) >= julianday(?)"
+        params.append(_iso_utc(cutoff))
+    params.append(status)
+
+    rows = conn.execute(
+        f"""
+        SELECT e.event_id, e.title, e.status,
+               COUNT(ei.evidence_id) AS evidence_count,
+               SUM(CASE WHEN ei.direction = 'indicator' THEN 1 ELSE 0 END) AS indicator_count,
+               SUM(CASE WHEN ei.direction = 'counterindicator' THEN 1 ELSE 0 END) AS counterindicator_count,
+               SUM(CASE WHEN ei.direction = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
+               MAX(strftime('%Y-%m-%dT%H:%M:%fZ', ei.created_at)) AS latest_evidence_at
+        FROM events e
+        LEFT JOIN evidence_items ei
+          ON ei.event_id = e.event_id
+          {join_filter}
+        WHERE e.status = ?
+        GROUP BY e.event_id, e.title, e.status
+        ORDER BY evidence_count DESC, latest_evidence_at DESC, e.title ASC
+        """,
+        params,
+    ).fetchall()
+
+    items = [{
+        "event_id": row["event_id"],
+        "title": row["title"],
+        "status": row["status"],
+        "evidence_count": int(row["evidence_count"] or 0),
+        "indicator_count": int(row["indicator_count"] or 0),
+        "counterindicator_count": int(row["counterindicator_count"] or 0),
+        "neutral_count": int(row["neutral_count"] or 0),
+        "latest_evidence_at": row["latest_evidence_at"],
+    } for row in rows]
+
+    return {
+        "status": status,
+        "window": window,
+        "generated_at": _iso_utc(generated),
+        "cutoff_at": _iso_utc(cutoff) if cutoff is not None else None,
+        "total_events": len(items),
+        "total_evidence": sum(item["evidence_count"] for item in items),
+        "items": items,
+    }
 
 
 def list_evidence(

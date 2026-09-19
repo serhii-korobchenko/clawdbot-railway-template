@@ -102,10 +102,11 @@
       type: "bar",
       data: {
         labels: points.map((point) => point.title),
-        datasets: [{
-          label: "Evidence",
-          data: points.map((point) => point.evidence_count),
-        }],
+        datasets: [
+          { label: "🟢 Indicator", data: points.map((point) => point.indicator_count), stack: "activity" },
+          { label: "🔴 Counterindicator", data: points.map((point) => point.counterindicator_count), stack: "activity" },
+          { label: "⚪ Neutral", data: points.map((point) => point.neutral_count), stack: "activity" },
+        ],
       },
       options: {
         indexAxis: "y",
@@ -114,6 +115,7 @@
         scales: {
           x: {
             beginAtZero: true,
+            stacked: true,
             ticks: {
               precision: 0,
             },
@@ -123,6 +125,7 @@
             },
           },
           y: {
+            stacked: true,
             ticks: {
               autoSkip: false,
               callback(value, index) {
@@ -135,16 +138,23 @@
           },
         },
         plugins: {
-          legend: {
-            display: false,
-          },
+          legend: { display: true, position: "bottom" },
           tooltip: {
+            mode: "index",
+            intersect: false,
             callbacks: {
               title: (items) => {
                 const point = points[items[0]?.dataIndex] || {};
                 return point.title || "";
               },
-              label: (context) => `Evidence: ${context.raw}`,
+              label: (context) => `${context.dataset.label}: ${context.raw}`,
+              afterBody: (items) => {
+                const point = points[items[0]?.dataIndex] || {};
+                return [
+                  `Усього: ${point.evidence_count ?? 0}`,
+                  `Останнє evidence: ${point.latest_evidence_at || "—"}`,
+                ];
+              },
             },
           },
         },

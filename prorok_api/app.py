@@ -11,8 +11,8 @@ from .auth import require_api_token
 from .config import ApiSettings
 from .db import readonly_connection, validate_database
 from .errors import DatabaseUnavailable
-from .evidence_models import CandidateEvidenceListResponse, EvidenceListResponse
-from .evidence_repository import list_candidate_evidence, list_evidence
+from .evidence_models import CandidateEvidenceListResponse, EvidenceActivityResponse, EvidenceListResponse
+from .evidence_repository import evidence_activity, list_candidate_evidence, list_evidence
 from .latest_refresh_models import LatestRefreshResponse
 from .latest_refresh_repository import get_latest_refresh
 from .models import (
@@ -25,6 +25,7 @@ from .repository import get_event_detail, get_latest_recommendation, list_events
 
 EventStatusQuery = Literal["active", "paused", "resolved", "archived"]
 EvidenceDirectionQuery = Literal["indicator", "counterindicator", "neutral"]
+EvidenceActivityWindowQuery = Literal["7d", "30d", "all"]
 CandidateDirectionQuery = Literal["indicator", "counterindicator"]
 EvidenceStrengthQuery = Literal["weak", "medium", "strong"]
 CandidateValidationStateQuery = Literal[
@@ -99,6 +100,18 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
                 source=source,
                 q=q,
             )
+
+    @app.get(
+        "/api/v1/evidence/activity",
+        response_model=EvidenceActivityResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def evidence_activity_summary(
+        status: EventStatusQuery = Query(default="active"),
+        window: EvidenceActivityWindowQuery = Query(default="7d"),
+    ):
+        with readonly_connection(resolved_settings.db_path) as conn:
+            return evidence_activity(conn, status=status, window=window)
 
     @app.get(
         "/api/v1/evidence/candidates",

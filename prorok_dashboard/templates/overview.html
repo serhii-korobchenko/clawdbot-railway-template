@@ -88,10 +88,17 @@
     </div>
     <span class="count-pill">{{ activity_points|length }} active</span>
   </div>
+  <nav class="activity-window-tabs" aria-label="Період активності">
+    {% for value, label in [('7d', '7 днів'), ('30d', '30 днів'), ('all', 'Весь час')] %}
+    <a class="activity-window-tab {% if activity_window == value %}is-active{% endif %}"
+       href="{{ request.url.include_query_params(activity_window=value) }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
   <p class="muted">
-    Накопичена кількість official evidence для кожної активної події.
-    Більша кількість означає вищу зафіксовану активність в інфопросторі;
-    rejected/candidate evidence до графіка не входять.
+    {% if activity_window == '7d' %}Official evidence, зафіксовані за останні 7 днів.
+    {% elif activity_window == '30d' %}Official evidence, зафіксовані за останні 30 днів.
+    {% else %}Накопичена кількість official evidence за весь час.{% endif %}
+    Графік показує тільки активні події; rejected/candidate evidence не враховуються.
   </p>
 
   {% if activity_points %}
@@ -104,7 +111,14 @@
     <li>
       <a class="activity-mobile-item" href="/events/{{ point.event_id }}">
         <span class="activity-mobile-number">{{ loop.index }}</span>
-        <span class="activity-mobile-title">{{ point.title }}</span>
+        <span class="activity-mobile-copy">
+          <span class="activity-mobile-title">{{ point.title }}</span>
+          <span class="activity-mobile-meta">
+            🟢 {{ point.indicator_count }} · 🔴 {{ point.counterindicator_count }}
+            {% if point.neutral_count %} · ⚪ {{ point.neutral_count }}{% endif %}
+            · Останнє: {{ point.latest_evidence_at|fmt_datetime if point.latest_evidence_at else '—' }}
+          </span>
+        </span>
         <strong>{{ point.evidence_count }} evidence</strong>
       </a>
     </li>
@@ -124,7 +138,7 @@
     ('archived', 'Archived', data.status_counts.archived)
   ] %}
   {% for value, label, count in tabs %}
-  {% set href = '/?' + (('status=' + value) if value else '') %}
+  {% set href = '/?activity_window=' + activity_window + (('&status=' + value) if value else '') %}
   <a
     class="status-tab {% if status_filter == value %}is-active{% endif %}"
     href="{{ href }}"
@@ -142,6 +156,7 @@
   {% else %}
   <input id="status-field" type="hidden" name="status" value="">
   {% endif %}
+  <input type="hidden" name="activity_window" value="{{ activity_window }}">
   <label for="event-search">Пошук</label>
   <input
     id="event-search"

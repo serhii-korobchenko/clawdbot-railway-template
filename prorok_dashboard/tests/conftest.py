@@ -79,6 +79,26 @@ class FakeApiClient:
             },
         }
 
+    async def get_evidence_activity(self, *, status="active", window="7d"):
+        return {
+            "status": status,
+            "window": window,
+            "generated_at": "2026-09-19T20:00:00.000Z",
+            "cutoff_at": None if window == "all" else "2026-09-12T20:00:00.000Z",
+            "total_events": 1,
+            "total_evidence": 1,
+            "items": [{
+                "event_id": "event-1",
+                "title": "Test event",
+                "status": "active",
+                "evidence_count": 1,
+                "indicator_count": 1,
+                "counterindicator_count": 0,
+                "neutral_count": 0,
+                "latest_evidence_at": "2026-09-18T11:00:00.000Z",
+            }],
+        }
+
     async def get_latest_refresh(self):
         return {
             "refresh": {

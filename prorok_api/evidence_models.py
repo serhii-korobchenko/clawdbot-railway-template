@@ -8,6 +8,7 @@ from pydantic import BaseModel
 EvidenceDirection = Literal["indicator", "counterindicator", "neutral"]
 EvidenceStrength = Literal["weak", "medium", "strong"]
 EventStatus = Literal["active", "paused", "resolved", "archived"]
+EvidenceActivityWindow = Literal["7d", "30d", "all"]
 CandidateValidationState = Literal[
     "legacy_unvalidated",
     "accepted",
@@ -50,6 +51,27 @@ class EvidenceListResponse(BaseModel):
     items: list[EvidenceListItemDTO]
     total: int
     filtered_total: int
+
+
+class EvidenceActivityItemDTO(BaseModel):
+    event_id: str
+    title: str
+    status: EventStatus
+    evidence_count: int
+    indicator_count: int
+    counterindicator_count: int
+    neutral_count: int
+    latest_evidence_at: str | None
+
+
+class EvidenceActivityResponse(BaseModel):
+    status: EventStatus
+    window: EvidenceActivityWindow
+    generated_at: str
+    cutoff_at: str | None
+    total_events: int
+    total_evidence: int
+    items: list[EvidenceActivityItemDTO]
 
 
 class CandidateEvidenceDTO(BaseModel):

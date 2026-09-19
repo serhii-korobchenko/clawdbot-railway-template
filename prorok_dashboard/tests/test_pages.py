@@ -70,12 +70,17 @@ def test_overview_shows_evidence_activity_chart(logged_in_client):
     response = logged_in_client.get("/")
     assert response.status_code == 200
     assert "Активність по подіях" in response.text
-    assert "Накопичена кількість official evidence" in response.text
+    assert "Official evidence, зафіксовані за останні 7 днів." in response.text
+    assert "7 днів" in response.text
+    assert "30 днів" in response.text
+    assert "Весь час" in response.text
     assert 'id="activity-chart-data"' in response.text
     assert 'id="evidence-activity-chart"' in response.text
     assert 'class="activity-mobile-list"' in response.text
     assert 'class="activity-mobile-number">1<' in response.text
     assert "1 evidence" in response.text
+    assert "🟢 1" in response.text
+    assert "Останнє:" in response.text
     assert "Test event" in response.text
 
     script = logged_in_client.get("/static/js/dashboard.js")
@@ -85,4 +90,19 @@ def test_overview_shows_evidence_activity_chart(logged_in_client):
     assert 'window.matchMedia("(max-width: 760px)")' in script.text
     assert "return String(index + 1)" in script.text
     assert "this.getLabelForValue(value)" in script.text
+    assert 'label: "🟢 Indicator"' in script.text
+    assert 'label: "🔴 Counterindicator"' in script.text
+    assert 'stack: "activity"' in script.text
+    assert "Останнє evidence" in script.text
     assert "Кількість official evidence" in script.text
+
+
+def test_evidence_activity_window_selector(logged_in_client):
+    response = logged_in_client.get("/?activity_window=30d&status=active&q=Test")
+    assert response.status_code == 200
+    assert "Official evidence, зафіксовані за останні 30 днів." in response.text
+    assert 'name="activity_window" value="30d"' in response.text
+
+
+def test_invalid_evidence_activity_window_is_422(logged_in_client):
+    assert logged_in_client.get("/?activity_window=365d").status_code == 422

@@ -12,6 +12,7 @@ from ..auth import is_authenticated
 router = APIRouter()
 StatusFilter = Literal["active", "paused", "resolved", "archived"]
 StatusQuery = Literal["", "active", "paused", "resolved", "archived"]
+ActivityWindow = Literal["7d", "30d", "all"]
 
 
 def _normalize_status(status: StatusQuery | None) -> StatusFilter | None:
@@ -35,6 +36,7 @@ async def overview(
     request: Request,
     status: StatusQuery | None = Query(default=None),
     q: str | None = Query(default=None, max_length=300),
+    activity_window: ActivityWindow = Query(default="7d"),
 ):
     if not is_authenticated(request):
         return RedirectResponse("/login", status_code=303)
@@ -44,7 +46,10 @@ async def overview(
 
     try:
         data = await _load(request, status=normalized_status, q=q)
-        activity_data = await _load(request, status="active", q=None)
+        evidence_activity = await request.app.state.prorok_api.get_evidence_activity(
+            status="active",
+            window=activity_window,
+        )
         latest_refresh = await request.app.state.prorok_api.get_latest_refresh()
     except (UpstreamUnavailable, UpstreamError):
         return templates.TemplateResponse(
@@ -60,25 +65,15 @@ async def overview(
             status_code=503,
         )
 
-    activity_points = sorted(
-        [
-            {
-                "event_id": item.get("event_id"),
-                "title": item.get("title") or item.get("event_id") or "Без назви",
-                "evidence_count": int(item.get("evidence_count") or 0),
-            }
-            for item in activity_data.get("items", [])
-        ],
-        key=lambda item: (-item["evidence_count"], item["title"].casefold()),
-    )
-
     return templates.TemplateResponse(
         request=request,
         name="overview.html",
         context={
             "data": data,
             "latest_refresh": latest_refresh,
-            "activity_points": activity_points,
+            "evidence_activity": evidence_activity,
+            "activity_points": evidence_activity.get("items", []),
+            "activity_window": activity_window,
             "status_filter": normalized_status,
             "q": q or "",
         },
