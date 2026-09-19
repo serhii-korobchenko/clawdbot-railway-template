@@ -567,6 +567,28 @@ function parseEvidenceDeleteRoute(payload, prefix) {
   return { token, evidenceId: Number.parseInt(rawEvidenceId, 10) };
 }
 
+function parseGlobalEvidenceDetailRoute(payload) {
+  const raw = payload.slice("evidence-detail:".length);
+  const [token, rawEvidenceId, filter, rawPage, ...extra] = raw.split(":");
+  if (
+    !token ||
+    !rawEvidenceId ||
+    !/^\d+$/.test(rawEvidenceId) ||
+    !["all", "indicator", "counterindicator"].includes(filter) ||
+    !rawPage ||
+    !/^\d+$/.test(rawPage) ||
+    extra.length
+  ) {
+    throw new Error("Invalid PROROK evidence detail callback payload");
+  }
+  return {
+    token,
+    evidenceId: Number.parseInt(rawEvidenceId, 10),
+    filter,
+    page: Number.parseInt(rawPage, 10),
+  };
+}
+
 function parseCliKeyValues(stdout) {
   const result = {};
   for (const rawLine of String(stdout || "").split(/\r?\n/)) {
@@ -907,6 +929,66 @@ async function collectGlobalEvidence() {
   return rows;
 }
 
+async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "all", page = 0) {
+  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const token = eventToken(event.event_id);
+  const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
+  const safePage = Math.max(Number(page) || 0, 0);
+
+  if (!item) {
+    return {
+      title: "🧾 Evidence недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock(`Evidence #${evidenceId} більше не існує. Жодних змін не виконано.`),
+        buttonsBlock([
+          button("◀️ До evidence", `evidence:${safeFilter}:${safePage}`),
+          button("◀️ До керування", "manage"),
+        ]),
+        buttonsBlock([button("🏠 Головне меню", "home")]),
+      ],
+    };
+  }
+
+  const source = item.source || {};
+  const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
+
+  return {
+    title: `🧾 Evidence #${item.evidence_id}`,
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Подія: ${event.title}`,
+          `Напрям: ${evidenceDirectionLabel(item.direction)}${item.strength ? ` · ${item.strength}` : ""}`,
+          `Summary: ${shortText(item.summary, 1100)}`,
+          `Relevance: ${item.relevance ?? "—"}`,
+          `Credibility: ${item.credibility ?? "—"}`,
+          `Створено: ${item.created_at || "—"}`,
+          "",
+          `Джерело: ${shortText(sourceLabel, 300)}`,
+          source.url ? `URL: ${source.url}` : null,
+          source.published_at ? `Опубліковано: ${source.published_at}` : null,
+          source.domain ? `Домен: ${source.domain}` : null,
+        ].filter(Boolean).join("\n"),
+      ),
+      buttonsBlock([
+        button("↗️ Відкрити подію", `event-any:${token}`),
+        button(
+          `🗑 Видалити #${item.evidence_id}`,
+          `delete-evidence:${token}:${item.evidence_id}`,
+          "danger",
+        ),
+      ]),
+      buttonsBlock([
+        button("◀️ До evidence", `evidence:${safeFilter}:${safePage}`),
+        button("◀️ До керування", "manage"),
+      ]),
+      buttonsBlock([button("🏠 Головне меню", "home")]),
+    ],
+  };
+}
+
 async function globalEvidencePresentation(filter = "all", page = 0) {
   const rows = await collectGlobalEvidence();
   const filtered = filter === "all" ? rows : rows.filter(({ item }) => item.direction === filter);
@@ -946,7 +1028,10 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
       );
       blocks.push(
         buttonsBlock([
-          button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`),
+          button(
+            `🔎 #${item.evidence_id} · Деталі`,
+            `evidence-detail:${token}:${item.evidence_id}:${filter}:${safePage}`,
+          ),
           button(`🗑 #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
         ]),
       );
@@ -957,7 +1042,12 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
   if (safePage > 0) pager.push(button("◀️ Попередня", `evidence:${filter}:${safePage - 1}`));
   if (safePage < maxPage) pager.push(button("Наступна ▶️", `evidence:${filter}:${safePage + 1}`));
   if (pager.length) blocks.push(buttonsBlock(pager));
-  blocks.push(buttonsBlock([button("🏠 Головне меню", "home")]));
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До керування", "manage"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
 
   return { title: "🧾 Evidence", tone: "neutral", blocks };
 }
@@ -1073,11 +1163,9 @@ function managePresentation() {
       textBlock(
         "Керування використовує deterministic PROROK operations. Видалення події або evidence завжди має окремий екран підтвердження.",
       ),
-      buttonsBlock([
-        button("🗂 Керування подіями", "manage-events:0", "primary"),
-        button("🧾 Керування evidence", "evidence:all:0"),
-        button("🎯 Рекомендації", "events"),
-      ]),
+      buttonsBlock([button("🗂 Керування подіями", "manage-events:0", "primary")]),
+      buttonsBlock([button("🧾 Керування evidence", "evidence:all:0")]),
+      buttonsBlock([button("🎯 Рекомендації", "events")]),
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
@@ -1126,6 +1214,11 @@ async function manageEventsPresentation(page = 0) {
 async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
+  if (payload.startsWith("evidence-detail:")) {
+    const { token, evidenceId, filter, page } = parseGlobalEvidenceDetailRoute(payload);
+    const eventId = await resolveEventId(token);
+    return await globalEvidenceDetailPresentation(eventId, evidenceId, filter, page);
+  }
   if (payload.startsWith("evidence:")) {
     const [, filter = "all", rawPage = "0"] = payload.split(":");
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
