@@ -1155,6 +1155,79 @@ async function archivePresentation(page = 0) {
   return { title: "🗂 Архів", tone: "neutral", blocks };
 }
 
+async function recommendationsPresentation() {
+  const items = await activeEvents();
+  const blocks = [textBlock(`Активні прогнози: ${items.length}`)];
+
+  if (!items.length) {
+    blocks.push(textBlock("Активних прогнозів немає."));
+  } else {
+    for (const event of items) {
+      const token = eventToken(event.event_id);
+      let recommendation = null;
+      try {
+        const data = await apiGet(
+          `/api/v1/events/${encodeURIComponent(event.event_id)}/latest-recommendation`,
+        );
+        recommendation = data.recommendation || null;
+      } catch {
+        recommendation = null;
+      }
+
+      const current = event.current_assessment?.probability_percent;
+      const currentText = current === null || current === undefined ? "—" : `${current}%`;
+
+      if (!recommendation) {
+        blocks.push(
+          textBlock(
+            [
+              shortText(event.title, 180),
+              `Поточна оцінка: ${currentText}`,
+              "Рекомендація: немає",
+            ].join("\n"),
+          ),
+        );
+        blocks.push(
+          buttonsBlock([
+            button("↗️ Відкрити подію", `event-any:${token}`),
+          ]),
+        );
+        continue;
+      }
+
+      const recommended = recommendation.recommended_probability;
+      const recommendedText =
+        recommended === null || recommended === undefined ? "—" : `${recommended}%`;
+      const statusText = recommendationStatusLabel(recommendation.status);
+
+      blocks.push(
+        textBlock(
+          [
+            shortText(event.title, 180),
+            `Поточна оцінка: ${currentText}`,
+            `Рекомендація: ${recommendedText}`,
+            `Статус: ${statusText}`,
+          ].join("\n"),
+        ),
+      );
+
+      const row = [
+        button("🎯 Відкрити рекомендацію", `recommendation:${token}`, "primary"),
+      ];
+      blocks.push(buttonsBlock(row));
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До керування", "manage"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: "🎯 Рекомендації", tone: "neutral", blocks };
+}
+
 function managePresentation() {
   return {
     title: "⚙️ Керування",
@@ -1165,7 +1238,7 @@ function managePresentation() {
       ),
       buttonsBlock([button("🗂 Керування подіями", "manage-events:0", "primary")]),
       buttonsBlock([button("🧾 Керування evidence", "evidence:all:0")]),
-      buttonsBlock([button("🎯 Рекомендації", "events")]),
+      buttonsBlock([button("🎯 Рекомендації", "recommendations")]),
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
@@ -1310,6 +1383,7 @@ async function renderPayload(payload, ctx = null) {
     return await archivePresentation(Number.parseInt(rawPage, 10));
   }
   if (payload === "manage") return managePresentation();
+  if (payload === "recommendations") return await recommendationsPresentation();
   if (payload.startsWith("manage-events:")) {
     const rawPage = payload.slice("manage-events:".length);
     if (!/^\d+$/.test(rawPage)) throw new Error("Invalid PROROK manage-events page");
