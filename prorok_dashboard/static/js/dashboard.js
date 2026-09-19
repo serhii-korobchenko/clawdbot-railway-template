@@ -66,6 +66,83 @@
     });
   }
 
+  function renderEvidenceActivityChart() {
+    const canvas = document.getElementById("evidence-activity-chart");
+    const dataNode = document.getElementById("activity-chart-data");
+
+    if (!canvas || !dataNode || typeof Chart === "undefined") {
+      return;
+    }
+
+    let points = [];
+    try {
+      points = JSON.parse(dataNode.dataset.points || "[]");
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(points) || points.length === 0) {
+      return;
+    }
+
+    const truncate = (value, max = 44) => {
+      const text = String(value || "");
+      return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+    };
+
+    const wrapper = canvas.closest(".activity-chart-wrap");
+    if (wrapper) {
+      wrapper.style.height = `${Math.max(320, points.length * 54)}px`;
+    }
+
+    new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: points.map((point) => truncate(point.title)),
+        datasets: [{
+          label: "Evidence",
+          data: points.map((point) => point.evidence_count),
+        }],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0,
+            },
+            title: {
+              display: true,
+              text: "Кількість official evidence",
+            },
+          },
+          y: {
+            ticks: {
+              autoSkip: false,
+            },
+          },
+        },
+        plugins: {
+          legend: {
+            display: false,
+          },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const point = points[items[0]?.dataIndex] || {};
+                return point.title || "";
+              },
+              label: (context) => `Evidence: ${context.raw}`,
+            },
+          },
+        },
+      },
+    });
+  }
+
   function syncFilterUrl({ push = false } = {}) {
     const statusField = document.getElementById("status-field");
     const searchField = document.getElementById("event-search");
@@ -127,9 +204,14 @@
     }
   });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", renderProbabilityChart);
-  } else {
+  const renderCharts = () => {
     renderProbabilityChart();
+    renderEvidenceActivityChart();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderCharts);
+  } else {
+    renderCharts();
   }
 })();

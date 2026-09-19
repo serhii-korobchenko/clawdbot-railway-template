@@ -70,6 +70,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .panel { padding: 22px; min-height: 300px; }
 .chart-panel { min-height: 360px; }
 #probability-chart { min-height: 280px; max-height: 310px; }
+.activity-chart-wrap { position: relative; min-height: 320px; margin-top: 16px; }
+#evidence-activity-chart { width: 100%; min-height: 300px; }
 .compact-meta, .mapping-list { margin: 18px 0 0; }
 .compact-meta > div, .mapping-list > div { display: grid; grid-template-columns: minmax(120px, .45fr) minmax(0, 1fr); gap: 12px; border-top: 1px solid var(--border); padding: 9px 0; }
 dt { color: var(--text-muted); }

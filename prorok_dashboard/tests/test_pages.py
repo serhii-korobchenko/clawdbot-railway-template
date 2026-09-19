@@ -64,3 +64,19 @@ def test_unknown_event_is_404(logged_in_client):
     response = logged_in_client.get("/events/missing")
     assert response.status_code == 404
     assert "Подію не знайдено" in response.text
+
+
+def test_overview_shows_evidence_activity_chart(logged_in_client):
+    response = logged_in_client.get("/")
+    assert response.status_code == 200
+    assert "Активність по подіях" in response.text
+    assert "Накопичена кількість official evidence" in response.text
+    assert 'id="activity-chart-data"' in response.text
+    assert 'id="evidence-activity-chart"' in response.text
+    assert "Test event" in response.text
+
+    script = logged_in_client.get("/static/js/dashboard.js")
+    assert script.status_code == 200
+    assert "renderEvidenceActivityChart" in script.text
+    assert 'indexAxis: "y"' in script.text
+    assert "Кількість official evidence" in script.text

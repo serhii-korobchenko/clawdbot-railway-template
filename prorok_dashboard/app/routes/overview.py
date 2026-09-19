@@ -44,6 +44,7 @@ async def overview(
 
     try:
         data = await _load(request, status=normalized_status, q=q)
+        activity_data = await _load(request, status="active", q=None)
         latest_refresh = await request.app.state.prorok_api.get_latest_refresh()
     except (UpstreamUnavailable, UpstreamError):
         return templates.TemplateResponse(
@@ -59,12 +60,25 @@ async def overview(
             status_code=503,
         )
 
+    activity_points = sorted(
+        [
+            {
+                "event_id": item.get("event_id"),
+                "title": item.get("title") or item.get("event_id") or "Без назви",
+                "evidence_count": int(item.get("evidence_count") or 0),
+            }
+            for item in activity_data.get("items", [])
+        ],
+        key=lambda item: (-item["evidence_count"], item["title"].casefold()),
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="overview.html",
         context={
             "data": data,
             "latest_refresh": latest_refresh,
+            "activity_points": activity_points,
             "status_filter": normalized_status,
             "q": q or "",
         },

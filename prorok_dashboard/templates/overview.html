@@ -80,6 +80,30 @@
 </section>
 {% endif %}
 
+<section class="section-block evidence-activity-section" aria-labelledby="evidence-activity-title">
+  <div class="section-heading-row">
+    <div>
+      <p class="eyebrow">Інфопростір</p>
+      <h2 id="evidence-activity-title">Активність по подіях</h2>
+    </div>
+    <span class="count-pill">{{ activity_points|length }} active</span>
+  </div>
+  <p class="muted">
+    Накопичена кількість official evidence для кожної активної події.
+    Більша кількість означає вищу зафіксовану активність в інфопросторі;
+    rejected/candidate evidence до графіка не входять.
+  </p>
+
+  {% if activity_points %}
+  <div class="activity-chart-wrap">
+    <div id="activity-chart-data" data-points='{{ activity_points|tojson|forceescape }}'></div>
+    <canvas id="evidence-activity-chart" aria-label="Кількість evidence по активних подіях"></canvas>
+  </div>
+  {% else %}
+  <p class="empty-copy">Активних подій немає.</p>
+  {% endif %}
+</section>
+
 <nav class="status-tabs" aria-label="Фільтр статусу">
   {% set tabs = [
     (None, 'Усі', data.total),
