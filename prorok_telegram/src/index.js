@@ -1162,7 +1162,8 @@ async function recommendationsPresentation() {
   if (!items.length) {
     blocks.push(textBlock("Активних прогнозів немає."));
   } else {
-    for (const event of items) {
+    for (const [index, event] of items.entries()) {
+      const number = index + 1;
       const token = eventToken(event.event_id);
       let recommendation = null;
       try {
@@ -1181,7 +1182,7 @@ async function recommendationsPresentation() {
         blocks.push(
           textBlock(
             [
-              shortText(event.title, 180),
+              `${number}. ${shortText(event.title, 180)}`,
               `Поточна оцінка: ${currentText}`,
               "Рекомендація: немає",
             ].join("\n"),
@@ -1189,7 +1190,10 @@ async function recommendationsPresentation() {
         );
         blocks.push(
           buttonsBlock([
-            button("↗️ Відкрити подію", `event-any:${token}`),
+            button(
+              `${number} · ↗️ ${shortText(event.title, 48)} — рекомендації немає`.slice(0, 80),
+              `event-any:${token}`,
+            ),
           ]),
         );
         continue;
@@ -1203,7 +1207,7 @@ async function recommendationsPresentation() {
       blocks.push(
         textBlock(
           [
-            shortText(event.title, 180),
+            `${number}. ${shortText(event.title, 180)}`,
             `Поточна оцінка: ${currentText}`,
             `Рекомендація: ${recommendedText}`,
             `Статус: ${statusText}`,
@@ -1212,7 +1216,11 @@ async function recommendationsPresentation() {
       );
 
       const row = [
-        button("🎯 Відкрити рекомендацію", `recommendation:${token}`, "primary"),
+        button(
+          `${number} · 🎯 ${shortText(event.title, 48)} — рекомендація ${recommendedText}`.slice(0, 80),
+          `recommendation:${token}`,
+          "primary",
+        ),
       ];
       blocks.push(buttonsBlock(row));
     }
