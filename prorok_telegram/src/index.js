@@ -11,6 +11,7 @@ const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
 const EVENT_LIST_PAGE_SIZE = 8;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
 const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
+const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_status_cli.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const execFileAsync = promisify(execFile);
@@ -129,6 +130,23 @@ function evidenceDirectionLabel(direction) {
   return "⚪ neutral";
 }
 
+function statusTransitionLabel(fromStatus, toStatus) {
+  if (fromStatus === "active" && toStatus === "paused") return "⏸ Поставити на паузу";
+  if (fromStatus === "paused" && toStatus === "active") return "▶️ Відновити";
+  if ((fromStatus === "active" || fromStatus === "paused") && toStatus === "archived") {
+    return "🗂 Архівувати";
+  }
+  if (fromStatus === "archived" && toStatus === "active") return "♻️ Відновити як active";
+  return `${fromStatus} → ${toStatus}`;
+}
+
+function allowedStatusTransitions(status) {
+  if (status === "active") return [["paused", "primary"], ["archived", "danger"]];
+  if (status === "paused") return [["active", "success"], ["archived", "danger"]];
+  if (status === "archived") return [["active", "success"]];
+  return [];
+}
+
 function telegramActorSnapshot(ctx) {
   const raw =
     ctx?.callback?.senderId ??
@@ -201,6 +219,18 @@ async function eventPresentation(eventId) {
     button("📈 Історія", `event-history:${token}`),
   );
   blocks.push(buttonsBlock(detailButtons));
+
+  for (const [toStatus, style] of allowedStatusTransitions(event.status)) {
+    blocks.push(
+      buttonsBlock([
+        button(
+          statusTransitionLabel(event.status, toStatus),
+          `status:${token}:${event.status}:${toStatus}`,
+          style,
+        ),
+      ]),
+    );
+  }
 
   blocks.push(
     buttonsBlock([
@@ -558,6 +588,21 @@ function parseCustomDecisionRoute(payload, prefix) {
   return { token, resultId, probability };
 }
 
+function parseStatusRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, fromStatus, toStatus, ...extra] = raw.split(":");
+  const validStatuses = ["active", "paused", "resolved", "archived"];
+  if (
+    !token ||
+    !validStatuses.includes(fromStatus) ||
+    !validStatuses.includes(toStatus) ||
+    extra.length
+  ) {
+    throw new Error("Invalid PROROK status callback payload");
+  }
+  return { token, fromStatus, toStatus };
+}
+
 function parseEvidenceDeleteRoute(payload, prefix) {
   const raw = payload.slice(prefix.length);
   const [token, rawEvidenceId, ...extra] = raw.split(":");
@@ -602,6 +647,32 @@ function parseCliKeyValues(stdout) {
   return result;
 }
 
+async function runStatusCli(eventId, fromStatus, toStatus, actorSnapshot) {
+  return await execFileAsync(
+    PYTHON_BIN,
+    [
+      STATUS_CLI,
+      "--db",
+      PROROK_DB_PATH,
+      "set-status",
+      String(eventId),
+      "--from-status",
+      fromStatus,
+      "--to-status",
+      toStatus,
+      "--source",
+      "telegram",
+      "--actor",
+      actorSnapshot,
+    ],
+    {
+      timeout: 20000,
+      maxBuffer: 64 * 1024,
+      env: process.env,
+    },
+  );
+}
+
 async function runDeleteCli(command, targetId, actorSnapshot) {
   return await execFileAsync(
     PYTHON_BIN,
@@ -630,6 +701,126 @@ async function loadEvidenceForDeletion(eventId, evidenceId) {
   const evidence = Array.isArray(data.evidence) ? data.evidence : [];
   const item = evidence.find((candidate) => Number(candidate.evidence_id) === Number(evidenceId)) || null;
   return { data, event, item };
+}
+
+async function statusConfirmationPresentation(eventId, expectedStatus, targetStatus) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const token = eventToken(event.event_id);
+
+  if (event.status !== expectedStatus) {
+    return {
+      title: "PROROK · Статус уже змінився",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Подія: ${event.title}`,
+            `Очікувався статус: ${expectedStatus}`,
+            `Поточний статус: ${event.status}`,
+            "",
+            "Стара кнопка більше не застосовується. Жодних змін не виконано.",
+          ].join("\n"),
+        ),
+        buttonsBlock([button("◀️ До події", `event-any:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  const transitions = allowedStatusTransitions(event.status).map(([status]) => status);
+  if (!transitions.includes(targetStatus)) {
+    throw new Error(`Unsupported PROROK status transition: ${event.status} -> ${targetStatus}`);
+  }
+
+  return {
+    title: "PROROK · Підтвердження статусу",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Подія: ${event.title}`,
+          `event_id: ${event.event_id}`,
+          `Поточний статус: ${event.status}`,
+          `Новий статус: ${targetStatus}`,
+          "",
+          targetStatus === "archived"
+            ? "Подія буде прибрана з active/paused списків і з'явиться в архіві."
+            : targetStatus === "paused"
+              ? "Подія залишиться в системі, але не буде active."
+              : "Подія знову стане active.",
+          "Після підтвердження deterministic CLI змінить production DB та запише audit.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button(
+          `✅ Підтвердити: ${expectedStatus} → ${targetStatus}`,
+          `status-apply:${token}:${expectedStatus}:${targetStatus}`,
+          "success",
+        ),
+      ]),
+      buttonsBlock([button("❌ Скасувати", `event-any:${token}`)]),
+    ],
+  };
+}
+
+async function appliedStatusPresentation(eventId, expectedStatus, targetStatus, ctx) {
+  const token = eventToken(eventId);
+  const actor = telegramActorSnapshot(ctx);
+
+  try {
+    const { stdout } = await runStatusCli(
+      eventId,
+      expectedStatus,
+      targetStatus,
+      actor,
+    );
+    const fields = parseCliKeyValues(stdout);
+    const after = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+    const event = after.event;
+
+    return {
+      title: "✅ PROROK · Статус змінено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Подія: ${event.title}`,
+            `Було: ${expectedStatus}`,
+            `Стало: ${event.status}`,
+            `status_change_id: ${fields.status_change_id || "—"}`,
+            `Час: ${fields.changed_at || event.updated_at || "—"}`,
+            `Actor: ${fields.actor_snapshot || actor}`,
+            fields.idempotent_replay === "true"
+              ? "Повторне натискання: без нової зміни."
+              : null,
+          ].filter(Boolean).join("\n"),
+        ),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${token}`, "primary"),
+          button("⚙️ До керування", "manage"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Статус не змінено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic status CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Жодної часткової зміни не повинно бути committed: CLI працює в одній SQLite transaction.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${token}`),
+          button("⚙️ До керування", "manage"),
+        ]),
+      ],
+    };
+  }
 }
 
 async function eventDeleteConfirmationPresentation(eventId) {
@@ -1304,6 +1495,16 @@ async function renderPayload(payload, ctx = null) {
     const [, filter = "all", rawPage = "0"] = payload.split(":");
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
     return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
+  }
+  if (payload.startsWith("status-apply:")) {
+    const { token, fromStatus, toStatus } = parseStatusRoute(payload, "status-apply:");
+    const eventId = await resolveEventId(token);
+    return await appliedStatusPresentation(eventId, fromStatus, toStatus, ctx);
+  }
+  if (payload.startsWith("status:")) {
+    const { token, fromStatus, toStatus } = parseStatusRoute(payload, "status:");
+    const eventId = await resolveEventId(token);
+    return await statusConfirmationPresentation(eventId, fromStatus, toStatus);
   }
   if (payload.startsWith("delete-event-apply:")) {
     const token = payload.slice("delete-event-apply:".length);
