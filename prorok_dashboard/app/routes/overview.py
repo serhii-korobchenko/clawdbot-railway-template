@@ -44,6 +44,7 @@ async def overview(
 
     try:
         data = await _load(request, status=normalized_status, q=q)
+        latest_refresh = await request.app.state.prorok_api.get_latest_refresh()
     except (UpstreamUnavailable, UpstreamError):
         return templates.TemplateResponse(
             request=request,
@@ -63,6 +64,7 @@ async def overview(
         name="overview.html",
         context={
             "data": data,
+            "latest_refresh": latest_refresh,
             "status_filter": normalized_status,
             "q": q or "",
         },

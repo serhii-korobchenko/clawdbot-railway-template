@@ -11,11 +11,29 @@ from .auth import require_api_token
 from .config import ApiSettings
 from .db import readonly_connection, validate_database
 from .errors import DatabaseUnavailable
-from .models import EventDetailResponse, EventListResponse
-from .repository import get_event_detail, list_events
+from .evidence_models import CandidateEvidenceListResponse, EvidenceListResponse
+from .evidence_repository import list_candidate_evidence, list_evidence
+from .latest_refresh_models import LatestRefreshResponse
+from .latest_refresh_repository import get_latest_refresh
+from .models import (
+    EventDetailResponse,
+    EventListResponse,
+    LatestRecommendationResponse,
+)
+from .repository import get_event_detail, get_latest_recommendation, list_events
 
 
 EventStatusQuery = Literal["active", "paused", "resolved", "archived"]
+EvidenceDirectionQuery = Literal["indicator", "counterindicator", "neutral"]
+CandidateDirectionQuery = Literal["indicator", "counterindicator"]
+EvidenceStrengthQuery = Literal["weak", "medium", "strong"]
+CandidateValidationStateQuery = Literal[
+    "legacy_unvalidated",
+    "accepted",
+    "rejected_source_policy",
+    "rejected_date_conflict",
+    "rejected_invalid_metadata",
+]
 
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
@@ -59,6 +77,75 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     ):
         with readonly_connection(resolved_settings.db_path) as conn:
             return list_events(conn, status=status, q=q)
+
+    @app.get(
+        "/api/v1/evidence",
+        response_model=EvidenceListResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def evidence_list(
+        event_id: str | None = Query(default=None, max_length=200),
+        direction: EvidenceDirectionQuery | None = Query(default=None),
+        strength: EvidenceStrengthQuery | None = Query(default=None),
+        source: str | None = Query(default=None, max_length=300),
+        q: str | None = Query(default=None, max_length=300),
+    ):
+        with readonly_connection(resolved_settings.db_path) as conn:
+            return list_evidence(
+                conn,
+                event_id=event_id,
+                direction=direction,
+                strength=strength,
+                source=source,
+                q=q,
+            )
+
+    @app.get(
+        "/api/v1/evidence/candidates",
+        response_model=CandidateEvidenceListResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def candidate_evidence_list(
+        event_id: str | None = Query(default=None, max_length=200),
+        direction: CandidateDirectionQuery | None = Query(default=None),
+        strength: EvidenceStrengthQuery | None = Query(default=None),
+        validation_state: CandidateValidationStateQuery | None = Query(default=None),
+        source: str | None = Query(default=None, max_length=300),
+        q: str | None = Query(default=None, max_length=300),
+    ):
+        with readonly_connection(resolved_settings.db_path) as conn:
+            return list_candidate_evidence(
+                conn,
+                event_id=event_id,
+                direction=direction,
+                strength=strength,
+                validation_state=validation_state,
+                source=source,
+                q=q,
+            )
+
+    @app.get(
+        "/api/v1/refresh/latest",
+        response_model=LatestRefreshResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def refresh_latest():
+        with readonly_connection(resolved_settings.db_path) as conn:
+            return get_latest_refresh(conn)
+
+    @app.get(
+        "/api/v1/events/{event_id}/latest-recommendation",
+        response_model=LatestRecommendationResponse,
+        dependencies=[Depends(require_api_token)],
+    )
+    def event_latest_recommendation(event_id: str):
+        with readonly_connection(resolved_settings.db_path) as conn:
+            result = get_latest_recommendation(conn, event_id)
+
+        if result is None:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        return result
 
     @app.get(
         "/api/v1/events/{event_id}",

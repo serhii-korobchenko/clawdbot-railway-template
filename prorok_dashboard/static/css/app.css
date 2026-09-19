@@ -17,12 +17,15 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--surface-muted); color: var(--text); line-height: 1.55; }
 a { color: inherit; }
-a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
 .site-header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
 .header-inner { min-height: 64px; display: flex; align-items: center; gap: 12px; }
 .brand { font-weight: 800; letter-spacing: .08em; text-decoration: none; }
 .brand-subtitle { color: var(--text-muted); font-size: .9rem; }
+.main-nav { display: flex; gap: 14px; margin-left: 20px; }
+.main-nav a { color: var(--text-muted); font-size: .92rem; font-weight: 650; text-decoration: none; }
+.main-nav a:hover { color: var(--text); text-decoration: underline; }
 .logout-form { margin-left: auto; }
 .link-button { border: 0; background: transparent; cursor: pointer; font: inherit; text-decoration: underline; }
 .main-content { padding: 36px 0 64px; }
@@ -106,15 +109,39 @@ code { font-size: .88em; overflow-wrap: anywhere; }
 .login-form { display: grid; gap: 10px; margin-top: 20px; }
 .alert-error { color: #912018; background: #fef3f2; border: 1px solid #fecdca; border-radius: 10px; padding: 10px 12px; margin-top: 16px; }
 .primary-link { font-weight: 700; }
+.evidence-filter-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0 22px; padding: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
+.evidence-filter-form label { display: grid; gap: 5px; color: var(--text-muted); font-size: .82rem; font-weight: 650; }
+.evidence-filter-form input, .evidence-filter-form select { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 10px 11px; font: inherit; }
+.evidence-search-field { grid-column: span 2; }
+.filter-actions { display: flex; gap: 12px; align-items: end; }
+.filter-actions a { padding-bottom: 9px; color: var(--text-muted); }
+.evidence-list { display: grid; gap: 14px; }
+.evidence-card { background: var(--surface); border: 1px solid var(--border); border-left: 5px solid #98a2b3; border-radius: 14px; padding: 18px 20px; }
+.evidence-card.evidence-indicator { border-left-color: var(--indicator); }
+.evidence-card.evidence-counterindicator { border-left-color: var(--counterindicator); }
+.evidence-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.evidence-card h2 { margin: 6px 0 0; font-size: 1.08rem; }
+.evidence-card h2 a { text-decoration: none; }
+.evidence-summary { margin: 14px 0; font-size: 1rem; }
+.candidate-title { margin: 14px 0 0; font-size: .98rem; }
+.validation-badge { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; padding: 5px 9px; font-size: .72rem; font-weight: 800; white-space: nowrap; }
+.validation-accepted { color: var(--active); }
+.validation-legacy_unvalidated { color: var(--archived); }
+.validation-rejected_source_policy, .validation-rejected_date_conflict, .validation-rejected_invalid_metadata { color: var(--counterindicator); }
+.candidate-rejection { color: #912018; background: #fef3f2; border: 1px solid #fecdca; border-radius: 10px; padding: 10px 12px; }
 @media (max-width: 760px) {
   .shell { width: min(100% - 20px, 1180px); }
   .main-content { padding-top: 22px; }
   .brand-subtitle { display: none; }
+  .main-nav { margin-left: 8px; gap: 10px; }
   .event-grid, .forecast-grid { grid-template-columns: 1fr; }
   .search-form { grid-template-columns: 1fr; }
   .search-form label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-  .page-heading, .card-topline, .timeline-topline, .source-box { align-items: flex-start; }
+  .page-heading, .card-topline, .timeline-topline, .source-box, .evidence-card-head { align-items: flex-start; }
   .event-card, .panel, .section-block, .event-detail-header { padding: 18px; }
   .chart-panel { min-height: 330px; }
   .compact-meta > div, .mapping-list > div { grid-template-columns: 1fr; gap: 2px; }
+  .evidence-filter-form { grid-template-columns: 1fr; padding: 14px; }
+  .evidence-search-field { grid-column: auto; }
+  .evidence-card { padding: 16px; }
 }

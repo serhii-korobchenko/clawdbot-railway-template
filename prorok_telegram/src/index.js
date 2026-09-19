@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const API_BASE = process.env.PROROK_API_BASE_URL || "http://127.0.0.1:18880";
@@ -6,6 +8,21 @@ const API_TOKEN = process.env.PROROK_API_TOKEN || "";
 const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
+const EVENT_LIST_PAGE_SIZE = 8;
+const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
+const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
+const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
+const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
+const execFileAsync = promisify(execFile);
+const CUSTOM_PROBABILITY_VALUES = [
+  0, 5,
+  10, 15, 20,
+  25, 30, 35,
+  40, 45, 50,
+  55, 60, 65, 70, 75,
+  80, 85, 90,
+  95, 100,
+];
 
 function callbackValue(payload) {
   return `${CALLBACK_NAMESPACE}:${payload}`;
@@ -72,6 +89,19 @@ async function activeEvents() {
   return Array.isArray(data.items) ? data.items : [];
 }
 
+async function archivedEvents() {
+  const data = await apiGet("/api/v1/events?status=archived");
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+function eventStatusIcon(status) {
+  if (status === "active") return "🟢";
+  if (status === "paused") return "⏸";
+  if (status === "resolved") return "✅";
+  if (status === "archived") return "🗂";
+  return "•";
+}
+
 async function resolveEventId(token, { activeOnly = false } = {}) {
   const items = activeOnly ? await activeEvents() : await allEvents();
   const matches = items.filter((event) => eventToken(event.event_id) === token);
@@ -97,6 +127,23 @@ function evidenceDirectionLabel(direction) {
   if (direction === "indicator") return "🟢 indicator";
   if (direction === "counterindicator") return "🔴 counterindicator";
   return "⚪ neutral";
+}
+
+function telegramActorSnapshot(ctx) {
+  const raw =
+    ctx?.callback?.senderId ??
+    ctx?.callback?.sender_id ??
+    ctx?.callback?.from?.id ??
+    ctx?.auth?.senderId ??
+    ctx?.auth?.sender_id ??
+    ctx?.senderId ??
+    ctx?.sender_id ??
+    ctx?.from?.id ??
+    null;
+  if (raw === null || raw === undefined || String(raw).trim() === "") {
+    return "telegram:authorized";
+  }
+  return `telegram:${shortText(String(raw), 120)}`;
 }
 
 async function eventsPresentation() {
@@ -131,32 +178,632 @@ async function eventPresentation(eventId) {
   const confidence = current?.confidence || "—";
   const horizon = event.forecast_horizon || "—";
   const token = eventToken(event.event_id);
+  const blocks = [
+    textBlock(event.question),
+    textBlock(
+      [
+        `Ймовірність: ${probability}`,
+        `Впевненість: ${confidence}`,
+        `Горизонт: ${horizon}`,
+        `Статус: ${event.status}`,
+        `Assessment: ${data.assessments?.length ?? 0}`,
+        `Evidence: ${data.evidence?.length ?? 0}`,
+      ].join("\n"),
+    ),
+  ];
 
-  return {
-    title: event.title,
-    tone: "neutral",
-    blocks: [
-      textBlock(event.question),
+  const detailButtons = [];
+  if (event.status === "active") {
+    detailButtons.push(button("🎯 Рекомендація", `recommendation:${token}`, "primary"));
+  }
+  detailButtons.push(
+    button("🧾 Evidence", `event-evidence:${token}`),
+    button("📈 Історія", `event-history:${token}`),
+  );
+  blocks.push(buttonsBlock(detailButtons));
+
+  blocks.push(
+    buttonsBlock([
+      button("🗑 Видалити подію", `delete-event:${token}`, "danger"),
+    ]),
+  );
+
+  const back =
+    event.status === "archived"
+      ? { label: "◀️ До архіву", payload: "archive" }
+      : event.status === "active"
+        ? { label: "◀️ До прогнозів", payload: "events" }
+        : { label: "◀️ До керування", payload: "manage-events:0" };
+
+  blocks.push(
+    buttonsBlock([
+      button(back.label, back.payload),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: event.title, tone: "neutral", blocks };
+}
+
+function recommendationStatusLabel(status) {
+  if (status === "actionable") return "потребує рішення";
+  if (status === "decided") return "рішення вже зафіксовано";
+  if (status === "stale") return "застаріла";
+  if (status === "no_change") return "зміна не рекомендована";
+  return String(status || "невідомо");
+}
+
+async function recommendationPresentation(eventId) {
+  const data = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const rec = data.recommendation;
+  const token = eventToken(eventId);
+  const blocks = [];
+
+  if (!rec) {
+    blocks.push(textBlock("Для цієї події валідної рекомендації поки немає."));
+  } else {
+    const decision = rec.decision;
+    blocks.push(
       textBlock(
         [
-          `Ймовірність: ${probability}`,
-          `Впевненість: ${confidence}`,
-          `Горизонт: ${horizon}`,
-          `Статус: ${event.status}`,
-          `Assessment: ${data.assessments?.length ?? 0}`,
-          `Evidence: ${data.evidence?.length ?? 0}`,
-        ].join("\n"),
+          `Поточна оцінка: ${rec.current_probability ?? "—"}%`,
+          `Рекомендація: ${rec.recommended_probability}%`,
+          `Baseline: ${rec.baseline_probability}% · assessment #${rec.baseline_assessment_id}`,
+          `Confidence рекомендації: ${rec.recommendation_confidence || "—"}`,
+          `Статус: ${recommendationStatusLabel(rec.status)}`,
+          rec.recommendation_reason
+            ? `Причина: ${shortText(rec.recommendation_reason, 700)}`
+            : null,
+          decision
+            ? `Рішення: ${decision.decision_type} → ${decision.selected_probability}% · ${decision.decided_at}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      ),
+    );
+
+    if (rec.actionable) {
+      const resultId = rec.refresh_event_result_id;
+      blocks.push(
+        buttonsBlock([
+          button(
+            `✅ Прийняти ${rec.recommended_probability}%`,
+            `decision-accept:${token}:${resultId}`,
+            "success",
+          ),
+          button(
+            "✏️ Власна оцінка",
+            `decision-custom:${token}:${resultId}`,
+            "primary",
+          ),
+          button(
+            `➖ Залишити ${rec.current_probability ?? rec.baseline_probability}%`,
+            `decision-keep:${token}:${resultId}`,
+          ),
+        ]),
+      );
+    } else if (rec.is_stale) {
+      blocks.push(
+        textBlock(
+          "Ця рекомендація більше не може бути застосована: поточний official assessment вже відрізняється від baseline.",
+        ),
+      );
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До події", `event-any:${token}`),
+      button("📊 До прогнозів", "events"),
+    ]),
+  );
+  return { title: "🎯 Рекомендація", tone: "neutral", blocks };
+}
+
+async function loadActionableRecommendation(eventId, expectedResultId) {
+  const data = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const rec = data.recommendation;
+
+  if (!rec) {
+    return { rec: null, problem: "Рекомендація більше недоступна." };
+  }
+  if (String(rec.refresh_event_result_id) !== String(expectedResultId)) {
+    return {
+      rec,
+      problem: [
+        "Ця кнопка належить до попередньої рекомендації.",
+        `Було: refresh_event_result_id #${expectedResultId}`,
+        `Зараз: refresh_event_result_id #${rec.refresh_event_result_id}`,
+      ].join("\n"),
+    };
+  }
+  if (!rec.actionable) {
+    return {
+      rec,
+      problem: `Рекомендація зараз має статус: ${recommendationStatusLabel(rec.status)}.`,
+    };
+  }
+  return { rec, problem: null };
+}
+
+async function runDecisionCli(refreshEventResultId, decisionType, probability = null) {
+  const args = [
+    DECISION_CLI,
+    "--db",
+    PROROK_DB_PATH,
+    "apply",
+    String(refreshEventResultId),
+    "--decision",
+    decisionType,
+    "--source",
+    "telegram",
+  ];
+  if (probability !== null && probability !== undefined) {
+    args.push("--probability", String(probability));
+  }
+
+  return await execFileAsync(PYTHON_BIN, args, {
+    timeout: 20000,
+    maxBuffer: 64 * 1024,
+    env: process.env,
+  });
+}
+
+function decisionErrorText(error) {
+  const stderr = String(error?.stderr || "").trim();
+  const stdout = String(error?.stdout || "").trim();
+  const message = stderr || stdout || String(error?.message || error);
+  return shortText(message, 900);
+}
+
+async function appliedDecisionPresentation(eventId, expectedResultId, decisionType, probability = null) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Рішення не застосовано",
+      tone: "neutral",
+      blocks: [
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([
+          button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+
+  try {
+    await runDecisionCli(expectedResultId, decisionType, probability);
+  } catch (error) {
+    return {
+      title: "PROROK · Рішення не застосовано",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic decision CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Якщо стан змінився паралельно, відкрийте актуальну рекомендацію ще раз.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary"),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+
+  const after = await apiGet(
+    `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
+  );
+  const afterRec = after.recommendation;
+  const decision = afterRec?.decision || null;
+
+  return {
+    title: "✅ PROROK · Рішення збережено",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `refresh_event_result_id: #${expectedResultId}`,
+          decision ? `Рішення: ${decision.decision_type}` : `Рішення: ${decisionType}`,
+          `Обрана ймовірність: ${decision?.selected_probability ?? probability ?? rec.recommended_probability}%`,
+          `Official forecast: ${afterRec?.current_probability ?? "—"}%`,
+          decision?.assessment_id
+            ? `Новий assessment: #${decision.assessment_id}`
+            : "Новий assessment: не створювався",
+          decision?.decided_at ? `Зафіксовано: ${decision.decided_at}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
       ),
       buttonsBlock([
-        button("🧾 Evidence", `event-evidence:${token}`),
-        button("📈 Історія", `event-history:${token}`),
-      ]),
-      buttonsBlock([
-        button("◀️ До прогнозів", "events"),
-        button("🏠 Головне меню", "home"),
+        button("🎯 Переглянути рекомендацію", `recommendation:${token}`),
+        button("◀️ До події", `event-any:${token}`, "primary"),
       ]),
     ],
   };
+}
+
+async function customProbabilityPresentation(eventId, expectedResultId) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Власна оцінка",
+      tone: "neutral",
+      blocks: [
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  const blocks = [
+    textBlock(
+      [
+        `Поточна оцінка: ${rec.current_probability}%`,
+        `Рекомендація: ${rec.recommended_probability}%`,
+        "",
+        "Оберіть власну оцінку. Після вибору буде окремий екран підтвердження.",
+      ].join("\n"),
+    ),
+  ];
+
+  for (let i = 0; i < CUSTOM_PROBABILITY_VALUES.length; i += 3) {
+    const row = CUSTOM_PROBABILITY_VALUES.slice(i, i + 3).map((value) => {
+      const prefix =
+        value === rec.recommended_probability ? "⭐ " :
+        value === rec.current_probability ? "• " :
+        "";
+      return button(
+        `${prefix}${value}%`,
+        `decision-custom-value:${token}:${expectedResultId}:${value}`,
+      );
+    });
+    blocks.push(buttonsBlock(row));
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До рекомендації", `recommendation:${token}`),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: "✏️ PROROK · Власна оцінка", tone: "neutral", blocks };
+}
+
+async function customProbabilityConfirmPresentation(eventId, expectedResultId, probability) {
+  const token = eventToken(eventId);
+  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+
+  if (problem) {
+    return {
+      title: "PROROK · Підтвердження",
+      tone: "neutral",
+      blocks: [
+        textBlock(`${problem}\n\nЖодних змін не виконано.`),
+        buttonsBlock([button("🎯 Актуальна рекомендація", `recommendation:${token}`, "primary")]),
+      ],
+    };
+  }
+
+  if (!CUSTOM_PROBABILITY_VALUES.includes(probability)) {
+    throw new Error("Invalid PROROK custom probability value");
+  }
+
+  return {
+    title: "PROROK · Підтвердження",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Поточний official forecast: ${rec.current_probability}%`,
+          `Рекомендація системи: ${rec.recommended_probability}%`,
+          `Ваша оцінка: ${probability}%`,
+          "",
+          `Після підтвердження буде створено новий official assessment ${probability}%.`,
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button(
+          `✅ Підтвердити ${probability}%`,
+          `decision-custom-apply:${token}:${expectedResultId}:${probability}`,
+          "success",
+        ),
+        button("◀️ Змінити", `decision-custom:${token}:${expectedResultId}`),
+      ]),
+      buttonsBlock([button("❌ Скасувати", `recommendation:${token}`)]),
+    ],
+  };
+}
+
+function parseDecisionRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, resultId, ...extra] = raw.split(":");
+  if (!token || !resultId || extra.length || !/^\d+$/.test(resultId)) {
+    throw new Error("Invalid PROROK decision callback payload");
+  }
+  return { token, resultId };
+}
+
+function parseCustomDecisionRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, resultId, rawProbability, ...extra] = raw.split(":");
+  if (
+    !token ||
+    !resultId ||
+    !rawProbability ||
+    extra.length ||
+    !/^\d+$/.test(resultId) ||
+    !/^\d+$/.test(rawProbability)
+  ) {
+    throw new Error("Invalid PROROK custom decision callback payload");
+  }
+  const probability = Number.parseInt(rawProbability, 10);
+  if (!CUSTOM_PROBABILITY_VALUES.includes(probability)) {
+    throw new Error("Unsupported PROROK custom probability value");
+  }
+  return { token, resultId, probability };
+}
+
+function parseEvidenceDeleteRoute(payload, prefix) {
+  const raw = payload.slice(prefix.length);
+  const [token, rawEvidenceId, ...extra] = raw.split(":");
+  if (!token || !rawEvidenceId || extra.length || !/^\d+$/.test(rawEvidenceId)) {
+    throw new Error("Invalid PROROK evidence delete callback payload");
+  }
+  return { token, evidenceId: Number.parseInt(rawEvidenceId, 10) };
+}
+
+function parseCliKeyValues(stdout) {
+  const result = {};
+  for (const rawLine of String(stdout || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const index = line.indexOf(":");
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim();
+    const value = line.slice(index + 1).trim();
+    if (key) result[key] = value;
+  }
+  return result;
+}
+
+async function runDeleteCli(command, targetId, actorSnapshot) {
+  return await execFileAsync(
+    PYTHON_BIN,
+    [
+      DELETE_CLI,
+      "--db",
+      PROROK_DB_PATH,
+      command,
+      String(targetId),
+      "--source",
+      "telegram",
+      "--actor",
+      actorSnapshot,
+    ],
+    {
+      timeout: 20000,
+      maxBuffer: 64 * 1024,
+      env: process.env,
+    },
+  );
+}
+
+async function loadEvidenceForDeletion(eventId, evidenceId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+  const item = evidence.find((candidate) => Number(candidate.evidence_id) === Number(evidenceId)) || null;
+  return { data, event, item };
+}
+
+async function eventDeleteConfirmationPresentation(eventId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const token = eventToken(event.event_id);
+  const assessmentCount = Array.isArray(data.assessments) ? data.assessments.length : 0;
+  const evidenceCount = Array.isArray(data.evidence) ? data.evidence.length : 0;
+
+  return {
+    title: "⚠️ PROROK · Видалення події",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Подія: ${event.title}`,
+          `event_id: ${event.event_id}`,
+          `Assessment буде видалено: ${assessmentCount}`,
+          `Evidence буде видалено: ${evidenceCount}`,
+          "",
+          "Це hard delete. Refresh/decision audit history зберігається за правилами schema v6, а сам факт видалення буде записано у deletion_audit.",
+          "Натискання кнопки нижче одразу змінить production DB.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button("✅ Підтвердити видалення", `delete-event-apply:${token}`, "danger"),
+        button("❌ Скасувати", `event-any:${token}`),
+      ]),
+    ],
+  };
+}
+
+async function evidenceDeleteConfirmationPresentation(eventId, evidenceId) {
+  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const token = eventToken(event.event_id);
+
+  if (!item) {
+    return {
+      title: "PROROK · Evidence недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock(`Evidence #${evidenceId} більше не існує в цій події. Жодних змін не виконано.`),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${token}`),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  }
+
+  const source = item.source || {};
+  const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
+
+  return {
+    title: "⚠️ PROROK · Видалення evidence",
+    tone: "neutral",
+    blocks: [
+      textBlock(
+        [
+          `Evidence #${item.evidence_id}`,
+          `Подія: ${event.title}`,
+          `Напрям: ${item.direction}${item.strength ? ` · ${item.strength}` : ""}`,
+          `Summary: ${shortText(item.summary, 500)}`,
+          `Джерело: ${shortText(sourceLabel, 180)}`,
+          "",
+          "Буде видалено тільки цей evidence. Source збережеться. Факт видалення буде записано у deletion_audit.",
+          "Натискання кнопки нижче одразу змінить production DB.",
+        ].join("\n"),
+      ),
+      buttonsBlock([
+        button(
+          `✅ Видалити evidence #${item.evidence_id}`,
+          `delete-evidence-apply:${token}:${item.evidence_id}`,
+          "danger",
+        ),
+        button("❌ Скасувати", `event-any:${token}`),
+      ]),
+    ],
+  };
+}
+
+async function appliedEventDeletePresentation(eventId, ctx) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const event = data.event;
+  const assessmentCount = Array.isArray(data.assessments) ? data.assessments.length : 0;
+  const evidenceCount = Array.isArray(data.evidence) ? data.evidence.length : 0;
+  const actor = telegramActorSnapshot(ctx);
+
+  try {
+    const { stdout } = await runDeleteCli("delete-event", eventId, actor);
+    const fields = parseCliKeyValues(stdout);
+    return {
+      title: "✅ PROROK · Подію видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Подія: ${event.title}`,
+            `event_id: ${eventId}`,
+            `deletion_id: ${fields.deletion_id || "—"}`,
+            `Assessment видалено: ${fields.assessment_count_deleted || assessmentCount}`,
+            `Evidence видалено: ${fields.evidence_count_deleted || evidenceCount}`,
+            `Sources збережено: ${fields.source_rows_preserved || "—"}`,
+            `Actor: ${fields.actor_snapshot || actor}`,
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("📊 До прогнозів", "events", "primary"),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Подію не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic delete CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Жоден частковий delete не повинен бути committed: CLI працює в одній SQLite transaction.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("◀️ До події", `event-any:${eventToken(eventId)}`),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  }
+}
+
+async function appliedEvidenceDeletePresentation(eventId, evidenceId, ctx) {
+  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const token = eventToken(eventId);
+
+  if (!item) {
+    return {
+      title: "PROROK · Evidence не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(`Evidence #${evidenceId} більше не існує. Жодних змін не виконано.`),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+
+  const actor = telegramActorSnapshot(ctx);
+
+  try {
+    const { stdout } = await runDeleteCli("delete-evidence", evidenceId, actor);
+    const fields = parseCliKeyValues(stdout);
+    return {
+      title: "✅ PROROK · Evidence видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Evidence #${evidenceId}`,
+            `Подія: ${event.title}`,
+            `deletion_id: ${fields.deletion_id || "—"}`,
+            `Source збережено: #${fields.source_id_preserved || item.source?.source_id || "—"}`,
+            `Actor: ${fields.actor_snapshot || actor}`,
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`, "primary"),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Evidence не видалено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            "Deterministic delete CLI відхилив операцію.",
+            decisionErrorText(error),
+            "",
+            "Жоден частковий delete не повинен бути committed: CLI працює в одній SQLite transaction.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🧾 Evidence події", `event-evidence:${token}`),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
 }
 
 async function eventEvidencePresentation(eventId) {
@@ -183,13 +830,18 @@ async function eventEvidencePresentation(eventId) {
           ].join("\n"),
         ),
       );
+      blocks.push(
+        buttonsBlock([
+          button(`🗑 Видалити evidence #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
+        ]),
+      );
     }
     if (evidence.length > 10) blocks.push(textBlock(`Показано 10 з ${evidence.length} evidence.`));
   }
 
   blocks.push(
     buttonsBlock([
-      button("◀️ До події", `event:${token}`),
+      button("◀️ До події", `event-any:${token}`),
       button("📊 До прогнозів", "events"),
     ]),
   );
@@ -224,7 +876,7 @@ async function eventHistoryPresentation(eventId) {
 
   blocks.push(
     buttonsBlock([
-      button("◀️ До події", `event:${token}`),
+      button("◀️ До події", `event-any:${token}`),
       button("📊 До прогнозів", "events"),
     ]),
   );
@@ -292,7 +944,12 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
           ].join("\n"),
         ),
       );
-      blocks.push(buttonsBlock([button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`)]));
+      blocks.push(
+        buttonsBlock([
+          button(`↗️ #${item.evidence_id} · Відкрити подію`, `event-any:${token}`),
+          button(`🗑 #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
+        ]),
+      );
     }
   }
 
@@ -305,18 +962,168 @@ async function globalEvidencePresentation(filter = "all", page = 0) {
   return { title: "🧾 Evidence", tone: "neutral", blocks };
 }
 
-function placeholderPresentation(title) {
+function refreshOutcomeLabel(outcome) {
+  if (outcome === "no_new_evidence") return "нових evidence немає";
+  if (outcome === "new_evidence") return "знайдено нові evidence";
+  if (outcome === "execution_failed") return "помилка виконання";
+  if (outcome === "parse_failed") return "помилка обробки";
+  return String(outcome || "невідомо");
+}
+
+async function latestRefreshPresentation() {
+  const data = await apiGet("/api/v1/refresh/latest");
+  const refresh = data.refresh;
+  const results = Array.isArray(data.results) ? data.results : [];
+  const blocks = [];
+
+  if (!refresh) {
+    blocks.push(textBlock("Історії refresh поки немає."));
+  } else {
+    blocks.push(
+      textBlock(
+        [
+          `Refresh #${refresh.refresh_id} · ${refresh.status}`,
+          `Початок: ${refresh.started_at || "—"}`,
+          `Завершення: ${refresh.finished_at || "—"}`,
+          `Перевірено подій: ${refresh.events_checked}`,
+          `Подій з новими evidence: ${refresh.events_with_new_evidence}`,
+          `Нових evidence: ${refresh.new_evidence_count}`,
+          `Рекомендацій: ${refresh.recommendations_count}`,
+          `Без зміни: ${refresh.no_change_count}`,
+          `Помилок: ${refresh.error_count}`,
+        ].join("\n"),
+      ),
+    );
+
+    for (const item of results.slice(0, 8)) {
+      const forecastLine =
+        item.recommended_probability === null || item.recommended_probability === undefined
+          ? `Прогноз: ${item.current_probability ?? item.baseline_probability ?? "—"}%`
+          : `Прогноз: ${item.baseline_probability ?? "—"}% → ${item.recommended_probability}%`;
+      const decisionLine = item.decision
+        ? `Рішення: ${item.decision.decision_type} → ${item.decision.selected_probability}%`
+        : null;
+      blocks.push(
+        textBlock(
+          [
+            shortText(item.event_title_snapshot || item.event_id || "Подія", 180),
+            `Результат: ${refreshOutcomeLabel(item.outcome)}`,
+            `Evidence: +${item.new_evidence_count} · 🟢 ${item.indicator_count} · 🔴 ${item.counterindicator_count}`,
+            forecastLine,
+            decisionLine,
+          ].filter(Boolean).join("\n"),
+        ),
+      );
+    }
+
+    if (results.length > 8) {
+      blocks.push(textBlock(`Показано 8 з ${results.length} результатів.`));
+    }
+  }
+
+  blocks.push(
+    buttonsBlock([
+      button("↻ Оновити", "refresh"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+  return { title: "🔄 Останнє оновлення", tone: "neutral", blocks };
+}
+
+async function archivePresentation(page = 0) {
+  const items = await archivedEvents();
+  const maxPage = Math.max(0, Math.ceil(items.length / EVENT_LIST_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * EVENT_LIST_PAGE_SIZE;
+  const pageItems = items.slice(start, start + EVENT_LIST_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Архівних прогнозів: ${items.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+  ];
+
+  if (!pageItems.length) {
+    blocks.push(textBlock("Архів порожній."));
+  } else {
+    for (const event of pageItems) {
+      const token = eventToken(event.event_id);
+      blocks.push(
+        buttonsBlock([
+          button(
+            `${event.current_assessment?.probability_percent ?? "—"}% · ${event.title}`.slice(0, 80),
+            `event-any:${token}`,
+          ),
+        ]),
+      );
+    }
+  }
+
+  const pager = [];
+  if (safePage > 0) pager.push(button("◀️ Попередня", `archive:${safePage - 1}`));
+  if (safePage < maxPage) pager.push(button("Наступна ▶️", `archive:${safePage + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+  blocks.push(buttonsBlock([button("🏠 Головне меню", "home")]));
+
+  return { title: "🗂 Архів", tone: "neutral", blocks };
+}
+
+function managePresentation() {
   return {
-    title,
+    title: "⚙️ Керування",
     tone: "neutral",
     blocks: [
-      textBlock("Цей розділ буде реалізований у наступних кроках M2."),
-      buttonsBlock([button("◀️ Назад", "home")]),
+      textBlock(
+        "Керування використовує deterministic PROROK operations. Видалення події або evidence завжди має окремий екран підтвердження.",
+      ),
+      buttonsBlock([
+        button("🗂 Керування подіями", "manage-events:0", "primary"),
+        button("🧾 Керування evidence", "evidence:all:0"),
+        button("🎯 Рекомендації", "events"),
+      ]),
+      buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
 }
 
-async function renderPayload(payload) {
+async function manageEventsPresentation(page = 0) {
+  const items = await allEvents();
+  const maxPage = Math.max(0, Math.ceil(items.length / EVENT_LIST_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * EVENT_LIST_PAGE_SIZE;
+  const pageItems = items.slice(start, start + EVENT_LIST_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Подій: ${items.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+  ];
+
+  if (!pageItems.length) {
+    blocks.push(textBlock("Подій немає."));
+  } else {
+    for (const event of pageItems) {
+      const token = eventToken(event.event_id);
+      blocks.push(
+        buttonsBlock([
+          button(
+            `${eventStatusIcon(event.status)} ${event.current_assessment?.probability_percent ?? "—"}% · ${event.title}`.slice(0, 80),
+            `event-any:${token}`,
+          ),
+        ]),
+      );
+    }
+  }
+
+  const pager = [];
+  if (safePage > 0) pager.push(button("◀️ Попередня", `manage-events:${safePage - 1}`));
+  if (safePage < maxPage) pager.push(button("Наступна ▶️", `manage-events:${safePage + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+  blocks.push(
+    buttonsBlock([
+      button("◀️ До керування", "manage"),
+      button("🏠 Головне меню", "home"),
+    ]),
+  );
+
+  return { title: "🗂 Керування подіями", tone: "neutral", blocks };
+}
+
+async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
   if (payload.startsWith("evidence:")) {
@@ -324,12 +1131,74 @@ async function renderPayload(payload) {
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
     return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
   }
+  if (payload.startsWith("delete-event-apply:")) {
+    const token = payload.slice("delete-event-apply:".length);
+    if (!token || token.includes(":")) throw new Error("Invalid PROROK event delete callback payload");
+    const eventId = await resolveEventId(token);
+    return await appliedEventDeletePresentation(eventId, ctx);
+  }
+  if (payload.startsWith("delete-event:")) {
+    const token = payload.slice("delete-event:".length);
+    if (!token || token.includes(":")) throw new Error("Invalid PROROK event delete callback payload");
+    const eventId = await resolveEventId(token);
+    return await eventDeleteConfirmationPresentation(eventId);
+  }
+  if (payload.startsWith("delete-evidence-apply:")) {
+    const { token, evidenceId } = parseEvidenceDeleteRoute(payload, "delete-evidence-apply:");
+    const eventId = await resolveEventId(token);
+    return await appliedEvidenceDeletePresentation(eventId, evidenceId, ctx);
+  }
+  if (payload.startsWith("delete-evidence:")) {
+    const { token, evidenceId } = parseEvidenceDeleteRoute(payload, "delete-evidence:");
+    const eventId = await resolveEventId(token);
+    return await evidenceDeleteConfirmationPresentation(eventId, evidenceId);
+  }
+  if (payload.startsWith("recommendation:")) {
+    const eventId = await resolveEventId(payload.slice("recommendation:".length), { activeOnly: true });
+    return await recommendationPresentation(eventId);
+  }
+  if (payload.startsWith("decision-accept:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-accept:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await appliedDecisionPresentation(eventId, resultId, "accept_recommendation");
+  }
+  if (payload.startsWith("decision-custom-value:")) {
+    const { token, resultId, probability } = parseCustomDecisionRoute(
+      payload,
+      "decision-custom-value:",
+    );
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await customProbabilityConfirmPresentation(eventId, resultId, probability);
+  }
+  if (payload.startsWith("decision-custom-apply:")) {
+    const { token, resultId, probability } = parseCustomDecisionRoute(
+      payload,
+      "decision-custom-apply:",
+    );
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await appliedDecisionPresentation(
+      eventId,
+      resultId,
+      "custom_probability",
+      probability,
+    );
+  }
+  if (payload.startsWith("decision-custom:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-custom:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await customProbabilityPresentation(eventId, resultId);
+  }
+  if (payload.startsWith("decision-keep:")) {
+    const { token, resultId } = parseDecisionRoute(payload, "decision-keep:");
+    const eventId = await resolveEventId(token, { activeOnly: true });
+    return await appliedDecisionPresentation(eventId, resultId, "keep_current");
+  }
   if (payload.startsWith("event-evidence:")) {
-    const eventId = await resolveEventId(payload.slice("event-evidence:".length), { activeOnly: true });
+    const eventId = await resolveEventId(payload.slice("event-evidence:".length));
     return await eventEvidencePresentation(eventId);
   }
   if (payload.startsWith("event-history:")) {
-    const eventId = await resolveEventId(payload.slice("event-history:".length), { activeOnly: true });
+    const eventId = await resolveEventId(payload.slice("event-history:".length));
     return await eventHistoryPresentation(eventId);
   }
   if (payload.startsWith("event-any:")) {
@@ -340,9 +1209,19 @@ async function renderPayload(payload) {
     const eventId = await resolveEventId(payload.slice("event:".length), { activeOnly: true });
     return await eventPresentation(eventId);
   }
-  if (payload === "refresh") return placeholderPresentation("🔄 Останнє оновлення");
-  if (payload === "archive") return placeholderPresentation("🗂 Архів");
-  if (payload === "manage") return placeholderPresentation("⚙️ Керування");
+  if (payload === "refresh") return await latestRefreshPresentation();
+  if (payload === "archive") return await archivePresentation(0);
+  if (payload.startsWith("archive:")) {
+    const rawPage = payload.slice("archive:".length);
+    if (!/^\d+$/.test(rawPage)) throw new Error("Invalid PROROK archive page");
+    return await archivePresentation(Number.parseInt(rawPage, 10));
+  }
+  if (payload === "manage") return managePresentation();
+  if (payload.startsWith("manage-events:")) {
+    const rawPage = payload.slice("manage-events:".length);
+    if (!/^\d+$/.test(rawPage)) throw new Error("Invalid PROROK manage-events page");
+    return await manageEventsPresentation(Number.parseInt(rawPage, 10));
+  }
   return mainPresentation();
 }
 
@@ -370,7 +1249,7 @@ export default definePluginEntry({
         }
 
         try {
-          const presentation = await renderPayload(ctx.callback.payload);
+          const presentation = await renderPayload(ctx.callback.payload, ctx);
           const text = presentation.title || "PROROK";
           const buttons = presentation.blocks
             .filter((block) => block.type === "buttons")

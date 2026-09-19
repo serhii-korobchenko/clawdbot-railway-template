@@ -3,7 +3,8 @@
 
 The launcher reads the current event, latest assessment, and recent evidence from the
 PROROK SQLite database, builds a structured no-write refresh prompt, and schedules a
-one-shot Telegram delivery through `openclaw cron add`.
+one-shot OpenClaw job. Delivery is announced to Telegram by default; callers can use
+`--no-deliver` for silent batch refresh workers.
 
 It intentionally does not write to the PROROK database. The resulting agent job is
 also instructed not to call `/prorok add-evidence` or `/prorok assess`; human review is
@@ -20,6 +21,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
+except ImportError:  # direct script execution from /app/prorok
+    from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
+
 
 DEFAULT_DB_PATH = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_PROMPT_DIR = Path("/data/workspace/prorok/refresh_prompts")
@@ -27,7 +33,7 @@ DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 DEFAULT_AT = "2m"
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_TOOLS = "tavily_search tavily_extract web_search web_fetch read"
+DEFAULT_TOOLS = "tavily_search tavily_extract web_fetch read"
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,18 @@ def load_latest_assessment(conn: sqlite3.Connection, event_id: str) -> Assessmen
     )
 
 
+def load_search_after_at(
+    conn: sqlite3.Connection,
+    event_id: str,
+    fallback_assessed_at: str,
+) -> str:
+    """Resolve the latest safe refresh boundary, else official assessment time."""
+    boundary = latest_safe_refresh_boundary_datetime(conn, event_id)
+    if boundary is not None:
+        return boundary.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return fallback_assessed_at or "n/a"
+
+
 def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> list[str]:
     rows = conn.execute(
         """
@@ -142,8 +160,14 @@ def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> 
     return lines
 
 
-def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: list[str]) -> str:
+def build_prompt(
+    event: EventState,
+    latest: AssessmentState,
+    evidence_lines: list[str],
+    search_after_at: str | None = None,
+) -> str:
     evidence_text = "\n".join(evidence_lines)
+    search_after = search_after_at or latest.assessed_at or "n/a"
     return f"""Виконай DRY-RUN оновлення PROROK для події {event.event_id}.
 
 ВАЖЛИВО:
@@ -151,7 +175,7 @@ def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: lis
 - НЕ запускай /prorok add-evidence.
 - НЕ запускай /prorok assess.
 - НЕ вигадуй URL.
-- Використовуй web/tavily пошук. Tavily search є основним інструментом; web_search/web_fetch використовуй як fallback.
+- Для пошуку використовуй тільки tavily_search. tavily_extract і web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; web_search для PROROK refresh не використовуй.
 - Поверни тільки фінальний structured report українською мовою.
 
 Подія:
@@ -169,13 +193,14 @@ current_band: {latest.band}
 current_label: {latest.label}
 current_confidence: {latest.confidence}
 last_assessed_at: {latest.assessed_at}
+search_after_at: {search_after}
 latest_rationale: {latest.rationale}
 
 Поточний evidence baseline, latest first:
 {evidence_text}
 
 Завдання пошуку:
-1. Знайди тільки нові або суттєво релевантні після last_assessed_at матеріали щодо події.
+1. Знайди тільки нові або суттєво релевантні після search_after_at матеріали щодо події.
 2. Відібери максимум 3 candidate evidence. Краще повернути NO_NEW_EVIDENCE_FOUND, ніж слабкі або дубльовані джерела.
 3. Прийнятні джерела: конкретні статті великих медіа, офіційні заяви/документи урядів або міжнародних організацій, авторитетні think tanks, профільні безпекові інститути.
 4. Заборонено включати як evidence:
@@ -189,8 +214,8 @@ latest_rationale: {latest.rationale}
    - якщо це переказ уже внесеної статті або того самого wire-story, не включай;
    - якщо все ж включаєш старіший матеріал як missed_baseline_evidence, duplicate_risk має бути high і треба чітко пояснити, чому він важливий.
 6. Freshness rule:
-   - за замовчуванням включай тільки матеріали після last_assessed_at;
-   - матеріали до last_assessed_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
+   - за замовчуванням включай тільки матеріали після search_after_at;
+   - матеріали до або на search_after_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
 7. Assessment rule:
    - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
    - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
@@ -283,14 +308,21 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
         "--tools",
         args.tools,
         "--expect-final",
-        "--announce",
-        "--channel",
-        "telegram",
-        "--to",
-        args.to,
-        "--thread-id",
-        str(args.thread_id),
     ]
+    if args.no_deliver:
+        cmd.append("--no-deliver")
+    else:
+        cmd.extend(
+            [
+                "--announce",
+                "--channel",
+                "telegram",
+                "--to",
+                args.to,
+                "--thread-id",
+                str(args.thread_id),
+            ]
+        )
     subprocess.run(cmd, check=True)
 
 
@@ -307,6 +339,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--agent", default="main", help="OpenClaw agent id")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=DEFAULT_TOOLS, help="Tool allow-list for the agent job")
+    parser.add_argument("--no-deliver", action="store_true", help="Create the one-shot job without Telegram delivery")
     parser.add_argument("--no-schedule", action="store_true", help="Only write the prompt file; do not create cron job")
     parser.add_argument("--evidence-limit", type=int, default=12, help="Number of latest evidence rows to include")
     return parser.parse_args(argv)
@@ -321,11 +354,12 @@ def main(argv: list[str]) -> int:
     try:
         event = load_event(conn, args.event_id)
         latest = load_latest_assessment(conn, args.event_id)
+        search_after_at = load_search_after_at(conn, args.event_id, latest.assessed_at)
         evidence_lines = load_evidence_lines(conn, args.event_id, args.evidence_limit)
     finally:
         conn.close()
 
-    prompt = build_prompt(event, latest, evidence_lines)
+    prompt = build_prompt(event, latest, evidence_lines, search_after_at)
     prompt_file = write_prompt(prompt_dir, args.event_id, prompt)
     print(f"prompt_file: {prompt_file}")
 
