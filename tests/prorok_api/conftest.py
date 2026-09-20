@@ -118,6 +118,7 @@ def db_path(tmp_path):
             title TEXT,
             source TEXT,
             url TEXT,
+            published_at TEXT,
             summary TEXT,
             why_it_matters TEXT,
             duplicate_risk TEXT,
