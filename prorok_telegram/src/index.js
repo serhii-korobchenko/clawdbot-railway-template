@@ -10,6 +10,7 @@ const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
 const EVENT_LIST_PAGE_SIZE = 8;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
+const EVIDENCE_ASSESSMENT_CLI = process.env.PROROK_EVIDENCE_ASSESSMENT_CLI || "/app/prorok/prorok_evidence_assessment_cli.py";
 const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
 const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_status_cli.py";
 const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/prorok_refresh_all_dry_run_quiet.py";
@@ -1081,6 +1082,67 @@ async function appliedEvidenceDeletePresentation(eventId, evidenceId, ctx) {
   }
 }
 
+function parseEvidenceAssessmentRoute(payload, prefix, withProbability = false) {
+  const raw = payload.slice(prefix.length);
+  const parts = raw.split(":");
+  if ((withProbability && parts.length !== 4) || (!withProbability && parts.length !== 3)) {
+    throw new Error("Invalid PROROK evidence assessment callback payload");
+  }
+  const [token, evidenceRaw, baselineRaw, probabilityRaw] = parts;
+  if (!token || !/^\d+$/.test(evidenceRaw) || !/^\d+$/.test(baselineRaw)) {
+    throw new Error("Invalid PROROK evidence assessment callback payload");
+  }
+  const result = { token, evidenceId: Number(evidenceRaw), baselineAssessmentId: Number(baselineRaw) };
+  if (withProbability) {
+    const probability = Number(probabilityRaw);
+    if (!CUSTOM_PROBABILITY_VALUES.includes(probability)) throw new Error("Invalid PROROK evidence assessment probability");
+    result.probability = probability;
+  }
+  return result;
+}
+
+async function evidenceAssessmentChoicePresentation(eventId, evidenceId, baselineAssessmentId) {
+  const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const item = (data.evidence || []).find((x) => Number(x.evidence_id) === Number(evidenceId));
+  const current = data.current_assessment;
+  const token = eventToken(eventId);
+  if (!item || !current || Number(current.assessment_id) !== Number(baselineAssessmentId)) {
+    return { title: "PROROK · Переоцінка недоступна", tone: "neutral", blocks: [
+      textBlock("Evidence або baseline змінилися. Відкрийте evidence ще раз."),
+      buttonsBlock([button("🧾 Evidence події", `event-evidence:${token}`)])
+    ]};
+  }
+  const blocks=[textBlock([`Evidence #${evidenceId}`, shortText(item.summary,500), `Поточний прогноз: ${current.probability_percent}% · Assessment #${current.assessment_id}`, "Оберіть нову оцінку:"].join("\n"))];
+  for(let i=0;i<CUSTOM_PROBABILITY_VALUES.length;i+=3){
+    blocks.push(buttonsBlock(CUSTOM_PROBABILITY_VALUES.slice(i,i+3).map(v=>button(`${v===current.probability_percent?"● ":""}${v}%`,`evidence-assess-value:${token}:${evidenceId}:${baselineAssessmentId}:${v}`))));
+  }
+  blocks.push(buttonsBlock([button("❌ Скасувати",`event-evidence:${token}`)]));
+  return {title:"📊 Переоцінка за evidence",tone:"neutral",blocks};
+}
+
+async function evidenceAssessmentConfirmPresentation(eventId,evidenceId,baselineAssessmentId,probability){
+  const data=await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  const item=(data.evidence||[]).find((x)=>Number(x.evidence_id)===Number(evidenceId));
+  const current=data.current_assessment; const token=eventToken(eventId);
+  if(!item||!current||Number(current.assessment_id)!==Number(baselineAssessmentId)) return evidenceAssessmentChoicePresentation(eventId,evidenceId,baselineAssessmentId);
+  const delta=probability-Number(current.probability_percent);
+  return {title:"Підтвердити переоцінку",tone:"neutral",blocks:[
+    textBlock([`Evidence #${evidenceId}`,shortText(item.summary,500),`Поточний прогноз: ${current.probability_percent}%`,`Новий прогноз: ${probability}%`,`Зміна: ${delta>0?"+":""}${delta} п.п.`,delta===0?"Evidence буде зафіксовано як оцінене без зміни прогнозу.":"Evidence буде зафіксовано як підстава зміни прогнозу."].join("\n")),
+    buttonsBlock([button("✅ Застосувати",`evidence-assess-apply:${token}:${evidenceId}:${baselineAssessmentId}:${probability}`,"success"),button("◀️ Змінити",`evidence-assess:${token}:${evidenceId}:${baselineAssessmentId}`)]),
+    buttonsBlock([button("❌ Скасувати",`event-evidence:${token}`)])
+  ]};
+}
+
+async function appliedEvidenceAssessmentPresentation(eventId,evidenceId,baselineAssessmentId,probability,ctx){
+  const token=eventToken(eventId);
+  const args=[EVIDENCE_ASSESSMENT_CLI,"--db",PROROK_DB_PATH,eventId,String(evidenceId),"--baseline-assessment-id",String(baselineAssessmentId),"--probability",String(probability),"--source","telegram"];
+  const actor=telegramActor(ctx); if(actor) args.push("--actor",String(actor));
+  try{ await execFileAsync(PYTHON_BIN,args,{timeout:20000,maxBuffer:64*1024,env:process.env}); }
+  catch(error){ return {title:"PROROK · Переоцінку не застосовано",tone:"neutral",blocks:[textBlock([decisionErrorText(error),"","Жодних змін не виконано."].join("\n")),buttonsBlock([button("🧾 Evidence події",`event-evidence:${token}`)])]}; }
+  const after=await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
+  return {title:"✅ Прогноз оновлено",tone:"neutral",blocks:[textBlock([`Evidence #${evidenceId}`,`Новий прогноз: ${after.current_assessment?.probability_percent ?? probability}%`,`Assessment #${after.current_assessment?.assessment_id ?? "—"}`].join("\n")),buttonsBlock([button("🧾 Evidence події",`event-evidence:${token}`),button("📈 Історія",`event-history:${token}`)])]};
+}
+
 async function eventEvidencePresentation(eventId) {
   const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
   const event = data.event;
@@ -1105,8 +1167,10 @@ async function eventEvidencePresentation(eventId) {
           ].join("\n"),
         ),
       );
+      const baselineId = data.current_assessment?.assessment_id;
       blocks.push(
         buttonsBlock([
+          ...(baselineId ? [button(`📊 Переоцінити за #${item.evidence_id}`, `evidence-assess:${token}:${item.evidence_id}:${baselineId}`, "primary")] : []),
           button(`🗑 Видалити evidence #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
         ]),
       );
@@ -1226,6 +1290,7 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
         ].filter(Boolean).join("\n"),
       ),
       buttonsBlock([
+        ...(event.current_assessment?.assessment_id ? [button("📊 Переоцінити прогноз", `evidence-assess:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`, "primary")] : []),
         button("↗️ Відкрити подію", `event-any:${token}`),
         button(
           `🗑 Видалити #${item.evidence_id}`,
@@ -1685,6 +1750,21 @@ async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
   if (payload === "candidates") return await candidatesPresentation();
+  if (payload.startsWith("evidence-assess-apply:")) {
+    const r=parseEvidenceAssessmentRoute(payload,"evidence-assess-apply:",true);
+    const eventId=await resolveEventId(r.token,{activeOnly:true});
+    return await appliedEvidenceAssessmentPresentation(eventId,r.evidenceId,r.baselineAssessmentId,r.probability,ctx);
+  }
+  if (payload.startsWith("evidence-assess-value:")) {
+    const r=parseEvidenceAssessmentRoute(payload,"evidence-assess-value:",true);
+    const eventId=await resolveEventId(r.token,{activeOnly:true});
+    return await evidenceAssessmentConfirmPresentation(eventId,r.evidenceId,r.baselineAssessmentId,r.probability);
+  }
+  if (payload.startsWith("evidence-assess:")) {
+    const r=parseEvidenceAssessmentRoute(payload,"evidence-assess:",false);
+    const eventId=await resolveEventId(r.token,{activeOnly:true});
+    return await evidenceAssessmentChoicePresentation(eventId,r.evidenceId,r.baselineAssessmentId);
+  }
   if (payload.startsWith("evidence-detail:")) {
     const { token, evidenceId, filter, page } = parseGlobalEvidenceDetailRoute(payload);
     const eventId = await resolveEventId(token);
