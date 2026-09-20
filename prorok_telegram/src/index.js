@@ -288,9 +288,24 @@ async function recommendationPresentation(eventId) {
           `Рекомендація: ${rec.recommended_probability}%`,
           `Baseline: ${rec.baseline_probability}% · assessment #${rec.baseline_assessment_id}`,
           `Confidence рекомендації: ${rec.recommendation_confidence || "—"}`,
+          rec.probability_delta !== null && rec.probability_delta !== undefined
+            ? `Зміна: ${rec.probability_delta > 0 ? "+" : ""}${rec.probability_delta} п.п.`
+            : null,
+          rec.net_evidence_impact
+            ? `Вплив evidence: ${rec.net_evidence_impact} · ${rec.net_evidence_direction || "—"}`
+            : null,
+          rec.baseline_incorporation
+            ? `Враховано в baseline: ${rec.baseline_incorporation}`
+            : null,
+          rec.category_transition !== null && rec.category_transition !== undefined
+            ? `Зміна категорії: ${rec.category_transition ? "так" : "ні"}`
+            : null,
           `Статус: ${recommendationStatusLabel(rec.status)}`,
           rec.recommendation_reason
             ? `Причина: ${shortText(rec.recommendation_reason, 700)}`
+            : null,
+          rec.delta_justification
+            ? `Чому саме ця оцінка: ${shortText(rec.delta_justification, 700)}`
             : null,
           decision
             ? `Рішення: ${decision.decision_type} → ${decision.selected_probability}% · ${decision.decided_at}`
