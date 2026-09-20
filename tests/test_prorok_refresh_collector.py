@@ -24,7 +24,13 @@ recommended_band: n/a
 recommended_label: n/a
 confidence: medium
 change_from_baseline: no_update
+probability_delta: n/a
+net_evidence_direction: n/a
+net_evidence_impact: n/a
+baseline_incorporation: n/a
+category_transition: n/a
 rationale: Підстав для зміни немає.
+delta_justification: n/a
 
 DB_ACTION:
 do_not_write: true
@@ -55,10 +61,16 @@ freshness: new_after_last_assessment
 ASSESSMENT_RECOMMENDATION:
 recommended_probability: 30%
 recommended_band: 25-35%
-recommended_label: Можливо
+recommended_label: Малоймовірно
 confidence: medium
 change_from_baseline: increase
+probability_delta: 10
+net_evidence_direction: positive
+net_evidence_impact: moderate
+baseline_incorporation: medium
+category_transition: yes
 rationale: Новий evidence підтримує помірне підвищення.
+delta_justification: Новий незалежний сигнал виправдовує підвищення на 10 п.п. і перехід до наступної категорії.
 
 DB_ACTION:
 do_not_write: true
@@ -155,6 +167,12 @@ def make_v3_db(path: Path) -> None:
             recommendation_confidence TEXT,
             change_recommended INTEGER NOT NULL DEFAULT 0,
             recommendation_reason TEXT,
+            probability_delta INTEGER,
+            net_evidence_direction TEXT,
+            net_evidence_impact TEXT,
+            baseline_incorporation TEXT,
+            category_transition INTEGER,
+            delta_justification TEXT,
             summary TEXT,
             candidate_rejected_count INTEGER NOT NULL DEFAULT 0,
             recommendation_valid INTEGER NOT NULL DEFAULT 1,
