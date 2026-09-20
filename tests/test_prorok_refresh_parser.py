@@ -198,7 +198,7 @@ def test_no_evidence_cannot_recommend_probability() -> None:
 
     with pytest.raises(
         RefreshParseError,
-        match="NO_NEW_EVIDENCE_FOUND requires recommended_probability",
+        match="NO_NEW_EVIDENCE_FOUND requires recommendation/calibration fields: n/a",
     ):
         parse_refresh_report(report)
 
@@ -211,7 +211,7 @@ def test_increase_requires_numeric_probability() -> None:
 
     with pytest.raises(
         RefreshParseError,
-        match="increase/decrease requires a numeric recommended_probability",
+        match="candidate evidence requires numeric recommended_probability",
     ):
         parse_refresh_report(report)
 
@@ -237,7 +237,7 @@ def test_no_update_cannot_change_probability() -> None:
 
     with pytest.raises(
         RefreshParseError,
-        match="no_update/keep cannot recommend a different probability",
+        match="change_from_baseline must be increase",
     ):
         parse_refresh_report(report)
 
