@@ -140,6 +140,8 @@ class LatestRecommendationDTO(BaseModel):
     current_probability: int | None
     is_stale: bool
     actionable: bool
+    can_keep_current: bool
+    accepted_candidate_count: int
     status: RecommendationStatus
     decision: RefreshDecisionDTO | None
 
