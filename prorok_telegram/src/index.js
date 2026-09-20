@@ -1170,7 +1170,7 @@ async function eventEvidencePresentation(eventId) {
       const baselineId = data.current_assessment?.assessment_id;
       blocks.push(
         buttonsBlock([
-          ...(baselineId ? [button(`📊 Переоцінити за #${item.evidence_id}`, `evidence-assess:${token}:${item.evidence_id}:${baselineId}`, "primary")] : []),
+          ...(baselineId ? [button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${baselineId}`, "primary")] : []),
           button(`🗑 Видалити evidence #${item.evidence_id}`, `delete-evidence:${token}:${item.evidence_id}`, "danger"),
         ]),
       );
@@ -1290,7 +1290,7 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
         ].filter(Boolean).join("\n"),
       ),
       buttonsBlock([
-        ...(event.current_assessment?.assessment_id ? [button("📊 Переоцінити прогноз", `evidence-assess:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`, "primary")] : []),
+        ...(event.current_assessment?.assessment_id ? [button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`, "primary")] : []),
         button("↗️ Відкрити подію", `event-any:${token}`),
         button(
           `🗑 Видалити #${item.evidence_id}`,
