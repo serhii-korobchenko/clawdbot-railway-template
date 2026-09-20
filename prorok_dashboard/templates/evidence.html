@@ -127,6 +127,7 @@
       {% else %}
       <span>Статус оцінки невідомий</span>
       {% endif %}
+      {% if item.assessment.provenance_type == 'evidence_manual' %}<span>Ручна оцінка Evidence #{{ item.evidence_id }}</span>{% endif %}
       {% if item.assessment.refresh_id is not none %}<span>Refresh #{{ item.assessment.refresh_id }}</span>{% endif %}
       {% if item.assessment.assessment_id is not none %}<span>Assessment #{{ item.assessment.assessment_id }}</span>{% endif %}
       {% if item.assessment.decided_at %}<span>{{ item.assessment.decided_at|fmt_datetime }}</span>{% endif %}
