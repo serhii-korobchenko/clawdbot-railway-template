@@ -12,6 +12,7 @@ const EVENT_LIST_PAGE_SIZE = 8;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
 const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
 const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_status_cli.py";
+const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/prorok_refresh_all_dry_run_quiet.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const execFileAsync = promisify(execFile);
@@ -1431,6 +1432,75 @@ async function recommendationsPresentation() {
   return { title: "🎯 Рекомендації", tone: "neutral", blocks };
 }
 
+async function manualRefreshPresentation() {
+  try {
+    const { stdout = "" } = await execFileAsync(
+      PYTHON_BIN,
+      [
+        REFRESH_ALL_CLI,
+        "--trigger-source",
+        "telegram",
+        "--start-at",
+        "2m",
+        "--spacing-minutes",
+        "3",
+      ],
+      {
+        timeout: 60000,
+        maxBuffer: 256 * 1024,
+        env: process.env,
+      },
+    );
+
+    const refreshId = stdout.match(/^refresh_id:\s*(\d+)/m)?.[1] || "—";
+    const targets = stdout.match(/^targets:\s*(\d+)/m)?.[1] || "—";
+    return {
+      title: "🔄 Перевірку запущено",
+      tone: "neutral",
+      blocks: [
+        textBlock(
+          [
+            `Refresh #${refreshId}`,
+            `Активних подій: ${targets}`,
+            "Перевірки заплановано тим самим PROROK pipeline, що використовується ранковим оновленням.",
+          ].join("\n"),
+        ),
+        buttonsBlock([
+          button("🔄 Останнє оновлення", "refresh", "primary"),
+          button("◀️ До керування", "manage"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    const detail = [
+      String(error?.stderr || ""),
+      String(error?.stdout || ""),
+      String(error?.message || error),
+    ].join("\n");
+
+    if (detail.includes("refresh already running")) {
+      const running = detail.match(/refresh already running:\s*([^\n]+)/)?.[1] || "";
+      return {
+        title: "⏳ Перевірка вже виконується",
+        tone: "neutral",
+        blocks: [
+          textBlock(
+            running
+              ? `Новий запуск не створено. Активний refresh: ${running}`
+              : "Новий запуск не створено, оскільки попередній refresh ще виконується.",
+          ),
+          buttonsBlock([
+            button("🔄 Останнє оновлення", "refresh", "primary"),
+            button("◀️ До керування", "manage"),
+          ]),
+        ],
+      };
+    }
+
+    throw error;
+  }
+}
+
 function managePresentation() {
   return {
     title: "⚙️ Керування",
@@ -1442,6 +1512,7 @@ function managePresentation() {
       buttonsBlock([button("🗂 Керування подіями", "manage-events:0", "primary")]),
       buttonsBlock([button("🧾 Керування evidence", "evidence:all:0")]),
       buttonsBlock([button("🎯 Рекомендації", "recommendations")]),
+      buttonsBlock([button("🔄 Запустити перевірку", "refresh-run", "primary")]),
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
@@ -1588,6 +1659,7 @@ async function renderPayload(payload, ctx = null) {
     const eventId = await resolveEventId(payload.slice("event:".length), { activeOnly: true });
     return await eventPresentation(eventId);
   }
+  if (payload === "refresh-run") return await manualRefreshPresentation();
   if (payload === "refresh") return await latestRefreshPresentation();
   if (payload === "archive") return await archivePresentation(0);
   if (payload.startsWith("archive:")) {
