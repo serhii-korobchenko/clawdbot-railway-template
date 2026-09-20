@@ -125,7 +125,7 @@ def parse_refresh_report(report,*,expected_event_id=None,expected_baseline_proba
     if not lines or lines[0].strip()!=HEADER:raise RefreshParseError(f"report must start with {HEADER}")
     ci,ai,di=_idx(lines,CANDIDATE_SECTION),_idx(lines,ASSESSMENT_SECTION),_idx(lines,DB_ACTION_SECTION)
     if not 0<ci<ai<di:raise RefreshParseError("report sections are missing or out of order")
-    h=_block(lines[1:ci],HEADER_KEYS,"header"); event_id=_nonempty(h["event_id"],"event_id"); baseline=_parse_percent(h["baseline_probability"],"baseline_probability")
+    h=_block(lines[1:ci],HEADER_KEYS,"header"); event_id=_nonempty(h["event_id"],"event_id"); baseline=_parse_percent(h["baseline_probability"],"baseline_probability"); _scale(baseline)
     if expected_event_id is not None and event_id!=expected_event_id:raise RefreshParseError(f"event_id mismatch: expected {expected_event_id!r}, got {event_id!r}")
     if expected_baseline_probability is not None and baseline!=expected_baseline_probability:raise RefreshParseError(f"baseline_probability mismatch: expected {expected_baseline_probability}, got {baseline}")
     candidates,no_reason,outcome=_parse_candidates(lines[ci+1:ai]); a=_block(lines[ai+1:di],ASSESSMENT_KEYS,"ASSESSMENT_RECOMMENDATION")
