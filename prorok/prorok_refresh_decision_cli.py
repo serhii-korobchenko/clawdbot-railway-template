@@ -47,13 +47,18 @@ SOURCE_CHOICES = ("telegram", "manual_cli", "system")
 
 PROBABILITY_SCALE = (
     (0, 5, "0-5%", "Віддалена можливість"),
-    (10, 20, "10-20%", "Низька ймовірність"),
+    (10, 20, "10-20%", "Ймовірність низька"),
     (25, 35, "25-35%", "Малоймовірно"),
     (40, 50, "40-50%", "Реалістична можливість"),
     (55, 75, "55-75%", "Ймовірно"),
     (80, 90, "80-90%", "Висока ймовірність"),
     (95, 100, "95-100%", "Майже напевно"),
 )
+ALLOWED_PROBABILITIES = {
+    value
+    for low, high, _band, _label in PROBABILITY_SCALE
+    for value in range(low, high + 1, 5)
+}
 
 
 class CliError(RuntimeError):
@@ -412,8 +417,12 @@ def resolve_selected_probability(
     if args.decision == DECISION_CUSTOM:
         if args.probability is None:
             raise CliError("--probability is required with custom_probability")
-        if not 0 <= args.probability <= 100:
-            raise CliError("--probability must be between 0 and 100")
+        if args.probability not in ALLOWED_PROBABILITIES:
+            allowed = ", ".join(str(value) for value in sorted(ALLOWED_PROBABILITIES))
+            raise CliError(
+                "--probability must be an allowed PROROK probability value: "
+                + allowed
+            )
         return int(args.probability)
 
     if args.decision == DECISION_KEEP:
