@@ -216,11 +216,22 @@ latest_rationale: {latest.rationale}
 6. Freshness rule:
    - за замовчуванням включай тільки матеріали після search_after_at;
    - матеріали до або на search_after_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
-7. Assessment rule:
-   - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
-   - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
+7. Calibration methodology:
+   - НЕ рахуй evidence арифметично: кількість indicators/counterindicators сама по собі не визначає зміну probability;
+   - спочатку оціни novelty, independence, credibility, relevance, directness до resolution criteria, relevance до forecast horizon, counterevidence та наскільки новий факт already priced into baseline;
+   - кілька джерел про той самий underlying fact рахуй як один інформаційний сигнал;
+   - визнач net_evidence_direction: positive|negative|balanced і net_evidence_impact: none|weak|moderate|strong;
+   - confirmation already-priced information не повинна автоматично підвищувати/знижувати probability;
+   - зміна qualitative band потребує сильнішого обґрунтування, ніж рух усередині band;
+   - допустимі значення probability ТІЛЬКИ: 0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100;
+   - канонічна шкала: 0-5%=Віддалена можливість; 10-20%=Ймовірність низька; 25-35%=Малоймовірно; 40-50%=Реалістична можливість; 55-75%=Ймовірно; 80-90%=Висока ймовірність; 95-100%=Майже напевно;
+   - probability_delta = recommended_probability - baseline_probability;
+   - category_transition=yes тільки якщо recommended_probability переходить в інший band;
+   - delta_justification має пояснити, чому обрано саме це число, а не поточне або сусідній qualitative threshold;
+   - якщо candidate evidence є, але balance materially не змінився, поверни recommended_probability рівним baseline, probability_delta: 0, change_from_baseline: no_update;
+   - якщо нових якісних evidence немає, recommendation/calibration поля, крім confidence/change/rationale, поверни n/a.
 8. Probability wording rule:
-   - не називай band 10-20% “середньою ймовірністю”; це завжди “низька ймовірність”;
+   - band 10-20% завжди має label “Ймовірність низька”;
    - слово medium може стосуватися тільки confidence, strength або quality, але не probability band.
 9. STRICT OUTPUT SCHEMA COMPLIANCE:
    - якщо є candidate evidence, КОЖЕН numbered candidate block ОБОВ'ЯЗКОВО повинен містити рівно всі 12 ключів:
@@ -271,8 +282,14 @@ recommended_probability: <число або n/a>
 recommended_band: <0-5%, 10-20%, 25-35%, 40-50%, 55-75%, 80-90%, 95-100% або n/a>
 recommended_label: <назва зі шкали або n/a>
 confidence: low|medium|high
-change_from_baseline: increase|decrease|keep|no_update
+change_from_baseline: increase|decrease|no_update
+probability_delta: <signed integer або n/a>
+net_evidence_direction: positive|negative|balanced|n/a
+net_evidence_impact: none|weak|moderate|strong|n/a
+baseline_incorporation: low|medium|high|n/a
+category_transition: yes|no|n/a
 rationale: 4-7 речень
+delta_justification: <чому саме це probability, або n/a якщо NO_NEW_EVIDENCE_FOUND>
 
 DB_ACTION:
 do_not_write: true
