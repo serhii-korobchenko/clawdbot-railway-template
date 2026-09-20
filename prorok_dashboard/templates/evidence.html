@@ -15,7 +15,7 @@
 </nav>
 
 {% if tab == 'candidates' %}
-<p class="info-note">Candidate evidence — це quarantine-дані з dry-run refresh. Вони не є official evidence, доки не пройдуть окремий процес прийняття.</p>
+<p class="info-note">Candidate evidence — quarantine-дані з dry-run refresh. Статус accepted означає, що candidate пройшов validation; official evidence він стає лише після фінального рішення користувача та promotion.</p>
 {% endif %}
 
 <form method="get" action="/evidence" class="evidence-filter-form">
@@ -149,6 +149,19 @@
     {% if item.why_it_matters %}<p><strong>Why it matters:</strong> {{ item.why_it_matters }}</p>{% endif %}
 
     <div class="quality-metrics">
+      <span>Validation: {{ item.validation_state }}</span>
+      {% if item.decision_type %}
+      <span>Decision: {{ item.decision_type }} · {{ item.selected_probability }}%</span>
+      {% elif item.validation_state == 'accepted' %}
+      <span>Decision: awaiting user decision</span>
+      {% else %}
+      <span>Decision: not applicable</span>
+      {% endif %}
+      {% if item.evidence_id is not none %}
+      <span>Official evidence: Evidence #{{ item.evidence_id }} · {{ item.promotion_action or 'promoted' }}</span>
+      {% else %}
+      <span>Official evidence: not promoted</span>
+      {% endif %}
       <span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span>
       <span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span>
       <span>Freshness: {{ item.freshness or '—' }}</span>
