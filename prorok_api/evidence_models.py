@@ -96,6 +96,13 @@ class CandidateEvidenceDTO(BaseModel):
     validation_state: CandidateValidationState
     rejection_reason: str | None
     created_at: str
+    decision_id: int | None
+    decision_type: Literal["accept_recommendation", "custom_probability", "keep_current"] | None
+    selected_probability: int | None
+    decided_at: str | None
+    promotion_action: Literal["inserted", "reused"] | None
+    evidence_id: int | None
+    promoted_at: str | None
 
 
 class CandidateEvidenceListResponse(BaseModel):
