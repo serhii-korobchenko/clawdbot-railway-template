@@ -28,6 +28,7 @@ EvidenceDirectionQuery = Literal["indicator", "counterindicator", "neutral"]
 EvidenceActivityWindowQuery = Literal["7d", "30d", "all"]
 CandidateDirectionQuery = Literal["indicator", "counterindicator"]
 EvidenceStrengthQuery = Literal["weak", "medium", "strong"]
+EvidenceSortQuery = Literal["newest", "oldest"]
 CandidateValidationStateQuery = Literal[
     "legacy_unvalidated",
     "accepted",
@@ -90,6 +91,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         strength: EvidenceStrengthQuery | None = Query(default=None),
         source: str | None = Query(default=None, max_length=300),
         q: str | None = Query(default=None, max_length=300),
+        sort: EvidenceSortQuery = Query(default="newest"),
     ):
         with readonly_connection(resolved_settings.db_path) as conn:
             return list_evidence(
@@ -99,6 +101,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
                 strength=strength,
                 source=source,
                 q=q,
+                sort=sort,
             )
 
     @app.get(
@@ -125,6 +128,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         validation_state: CandidateValidationStateQuery | None = Query(default=None),
         source: str | None = Query(default=None, max_length=300),
         q: str | None = Query(default=None, max_length=300),
+        sort: EvidenceSortQuery = Query(default="newest"),
     ):
         with readonly_connection(resolved_settings.db_path) as conn:
             return list_candidate_evidence(
@@ -135,6 +139,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
                 validation_state=validation_state,
                 source=source,
                 q=q,
+                sort=sort,
             )
 
     @app.get(
