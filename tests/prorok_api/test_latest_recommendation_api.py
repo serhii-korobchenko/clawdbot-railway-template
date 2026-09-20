@@ -16,6 +16,12 @@ def test_latest_recommendation_is_actionable(client, auth_headers):
     assert rec["baseline_assessment_id"] == 1
     assert rec["baseline_probability"] == 35
     assert rec["recommended_probability"] == 45
+    assert rec["probability_delta"] == 10
+    assert rec["net_evidence_direction"] == "positive"
+    assert rec["net_evidence_impact"] == "moderate"
+    assert rec["baseline_incorporation"] == "medium"
+    assert rec["category_transition"] is True
+    assert rec["delta_justification"] == "Independent evidence supports a 10 percentage-point increase and a category transition."
     assert rec["current_assessment_id"] == 1
     assert rec["current_probability"] == 35
     assert rec["recommendation_valid"] is True
