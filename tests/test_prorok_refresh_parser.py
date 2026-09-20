@@ -217,12 +217,11 @@ def test_increase_requires_numeric_probability() -> None:
 
 
 def test_keep_is_normalized_to_no_update_when_probability_is_unchanged() -> None:
-    report = POSITIVE_REPORT.replace(
-        "recommended_probability: 65%",
-        "recommended_probability: 60%",
-    ).replace(
-        "change_from_baseline: increase",
-        "change_from_baseline: keep",
+    report = (
+        POSITIVE_REPORT
+        .replace("recommended_probability: 65%", "recommended_probability: 60%")
+        .replace("change_from_baseline: increase", "change_from_baseline: keep")
+        .replace("probability_delta: 5", "probability_delta: 0")
     )
 
     result = parse_refresh_report(report)
