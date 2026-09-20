@@ -72,6 +72,14 @@
     <input type="search" name="source" value="{{ source }}" placeholder="domain, title або URL">
   </label>
 
+  <label>
+    <span>Сортування</span>
+    <select name="sort">
+      <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Нові спочатку</option>
+      <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Старі спочатку</option>
+    </select>
+  </label>
+
   <label class="evidence-search-field">
     <span>Пошук</span>
     <input type="search" name="q" value="{{ q }}" placeholder="summary, подія, джерело">
