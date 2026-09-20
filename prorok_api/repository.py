@@ -221,10 +221,24 @@ def get_event_detail(
             s.url,
             s.canonical_url,
             s.published_at,
-            s.source_type
+            s.source_type,
+            p.refresh_event_result_id,
+            rer.refresh_id,
+            d.decision_id,
+            d.decision_type,
+            d.baseline_probability,
+            d.selected_probability,
+            d.assessment_id AS decision_assessment_id,
+            d.decided_at
         FROM evidence_items ei
         JOIN sources s
           ON s.source_id = ei.source_id
+        LEFT JOIN refresh_candidate_promotions p
+          ON p.evidence_id = ei.evidence_id
+        LEFT JOIN refresh_user_decisions d
+          ON d.decision_id = p.decision_id
+        LEFT JOIN refresh_event_results rer
+          ON rer.refresh_event_result_id = p.refresh_event_result_id
         WHERE ei.event_id = ?
         ORDER BY ei.created_at ASC, ei.evidence_id ASC
         """,
@@ -267,6 +281,25 @@ def get_event_detail(
                 "published_at": row["published_at"],
                 "source_type": row["source_type"],
             },
+            "assessment": {
+                "status": (
+                    "unknown"
+                    if row["decision_id"] is None
+                    else (
+                        "assessed_unchanged"
+                        if int(row["selected_probability"]) == int(row["baseline_probability"])
+                        else "assessed_changed"
+                    )
+                ),
+                "refresh_id": row["refresh_id"],
+                "refresh_event_result_id": row["refresh_event_result_id"],
+                "decision_id": row["decision_id"],
+                "decision_type": row["decision_type"],
+                "baseline_probability": row["baseline_probability"],
+                "selected_probability": row["selected_probability"],
+                "assessment_id": row["decision_assessment_id"],
+                "decided_at": row["decided_at"],
+            },
         }
         for row in evidence_rows
     ]
@@ -293,7 +326,7 @@ def get_event_detail(
         "assessments": assessments,
         "evidence": evidence,
         "limitations": {
-            "assessment_evidence_attribution": "unavailable",
+            "assessment_evidence_attribution": "refresh_lifecycle_only",
         },
     }
 
