@@ -59,7 +59,11 @@ function mainPresentation() {
       buttonsBlock([
         button("📊 Прогнози", "events", "primary"),
         button("🧾 Evidence", "evidence:all:0"),
+      ]),
+      buttonsBlock([
         button("🔄 Останнє оновлення", "refresh"),
+      ]),
+      buttonsBlock([
         button("🗂 Архів", "archive"),
         button("⚙️ Керування", "manage"),
       ]),
