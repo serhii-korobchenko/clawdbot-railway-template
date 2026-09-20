@@ -133,6 +133,17 @@ def db_path(tmp_path):
             validation_state TEXT NOT NULL DEFAULT 'pending'
         );
 
+        CREATE TABLE refresh_candidate_promotions (
+            promotion_id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL UNIQUE,
+            refresh_event_result_id INTEGER NOT NULL,
+            decision_id INTEGER NOT NULL,
+            evidence_id INTEGER,
+            run_id INTEGER NOT NULL,
+            promotion_action TEXT NOT NULL,
+            promoted_at TEXT NOT NULL
+        );
+
         CREATE TABLE refresh_user_decisions (
             decision_id INTEGER PRIMARY KEY,
             refresh_event_result_id INTEGER NOT NULL UNIQUE,
