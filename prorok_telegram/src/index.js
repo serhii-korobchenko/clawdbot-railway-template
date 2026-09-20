@@ -318,9 +318,11 @@ async function recommendationPresentation(eventId) {
           blocks.push(
             buttonsBlock([
               {
-                type: "url",
                 label: `🔗 ${sourceLabel}`.slice(0, 64),
-                url: item.url,
+                action: {
+                  type: "url",
+                  url: item.url,
+                },
               },
             ]),
           );
