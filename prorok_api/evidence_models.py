@@ -39,7 +39,9 @@ class EvidenceAssessmentDTO(BaseModel):
     refresh_id: int | None = None
     refresh_event_result_id: int | None = None
     decision_id: int | None = None
-    decision_type: Literal["accept_recommendation", "custom_probability", "keep_current"] | None = None
+    decision_type: Literal["accept_recommendation", "custom_probability", "keep_current", "evidence_manual"] | None = None
+    provenance_type: Literal["refresh", "evidence_manual"] | None = None
+    evidence_assessment_decision_id: int | None = None
     baseline_probability: int | None = None
     selected_probability: int | None = None
     assessment_id: int | None = None
