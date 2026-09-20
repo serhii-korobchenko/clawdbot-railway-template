@@ -34,6 +34,18 @@ class EvidenceSourceDTO(BaseModel):
     source_type: str | None
 
 
+class EvidenceAssessmentDTO(BaseModel):
+    status: Literal["assessed_changed", "assessed_unchanged", "unknown"]
+    refresh_id: int | None = None
+    refresh_event_result_id: int | None = None
+    decision_id: int | None = None
+    decision_type: Literal["accept_recommendation", "custom_probability", "keep_current"] | None = None
+    baseline_probability: int | None = None
+    selected_probability: int | None = None
+    assessment_id: int | None = None
+    decided_at: str | None = None
+
+
 class EvidenceListItemDTO(BaseModel):
     evidence_id: int
     run_id: int | None
@@ -45,6 +57,7 @@ class EvidenceListItemDTO(BaseModel):
     credibility: int | None
     event: EvidenceEventDTO
     source: EvidenceSourceDTO
+    assessment: EvidenceAssessmentDTO
 
 
 class EvidenceListResponse(BaseModel):
