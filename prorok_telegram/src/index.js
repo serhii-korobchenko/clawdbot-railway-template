@@ -1650,7 +1650,10 @@ export default definePluginEntry({
             .join("\n\n");
           await ctx.respond.editMessage({ text: body ? `${text}\n\n${body}` : text, buttons });
         } catch (error) {
-          await ctx.respond.reply({ text: `PROROK error: ${String(error).slice(0, 400)}` });
+          const errorText = String(error);
+          if (!errorText.includes("message is not modified")) {
+            await ctx.respond.reply({ text: `PROROK error: ${errorText.slice(0, 400)}` });
+          }
         }
         return { handled: true };
       },
