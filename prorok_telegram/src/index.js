@@ -320,6 +320,17 @@ async function recommendationPresentation(eventId) {
           ),
         ]),
       );
+    } else if (rec.can_keep_current) {
+      const resultId = rec.refresh_event_result_id;
+      blocks.push(
+        buttonsBlock([
+          button(
+            `✅ Прийняти evidence · залишити ${rec.current_probability ?? rec.baseline_probability}%`,
+            `decision-keep:${token}:${resultId}`,
+            "success",
+          ),
+        ]),
+      );
     } else if (rec.is_stale) {
       blocks.push(
         textBlock(
@@ -338,7 +349,7 @@ async function recommendationPresentation(eventId) {
   return { title: "🎯 Рекомендація", tone: "neutral", blocks };
 }
 
-async function loadActionableRecommendation(eventId, expectedResultId) {
+async function loadDecisionRecommendation(eventId, expectedResultId, decisionType = null) {
   const data = await apiGet(
     `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
   );
@@ -357,7 +368,9 @@ async function loadActionableRecommendation(eventId, expectedResultId) {
       ].join("\n"),
     };
   }
-  if (!rec.actionable) {
+  const canApply =
+    rec.actionable || (decisionType === "keep_current" && rec.can_keep_current);
+  if (!canApply) {
     return {
       rec,
       problem: `Рекомендація зараз має статус: ${recommendationStatusLabel(rec.status)}.`,
@@ -398,7 +411,11 @@ function decisionErrorText(error) {
 
 async function appliedDecisionPresentation(eventId, expectedResultId, decisionType, probability = null) {
   const token = eventToken(eventId);
-  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+  const { rec, problem } = await loadDecisionRecommendation(
+    eventId,
+    expectedResultId,
+    decisionType,
+  );
 
   if (problem) {
     return {
@@ -471,7 +488,7 @@ async function appliedDecisionPresentation(eventId, expectedResultId, decisionTy
 
 async function customProbabilityPresentation(eventId, expectedResultId) {
   const token = eventToken(eventId);
-  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+  const { rec, problem } = await loadDecisionRecommendation(eventId, expectedResultId);
 
   if (problem) {
     return {
@@ -521,7 +538,7 @@ async function customProbabilityPresentation(eventId, expectedResultId) {
 
 async function customProbabilityConfirmPresentation(eventId, expectedResultId, probability) {
   const token = eventToken(eventId);
-  const { rec, problem } = await loadActionableRecommendation(eventId, expectedResultId);
+  const { rec, problem } = await loadDecisionRecommendation(eventId, expectedResultId);
 
   if (problem) {
     return {
