@@ -623,6 +623,12 @@ def apply_success(
             f"LLM recommendation invalidated because {rejected_count} "
             "candidate(s) failed deterministic validation."
         )
+        fields["probability_delta"] = None
+        fields["net_evidence_direction"] = None
+        fields["net_evidence_impact"] = None
+        fields["baseline_incorporation"] = None
+        fields["category_transition"] = None
+        fields["delta_justification"] = None
 
     fields.update(
         {
