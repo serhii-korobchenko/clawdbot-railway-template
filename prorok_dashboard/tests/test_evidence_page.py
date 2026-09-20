@@ -87,7 +87,7 @@ def test_candidate_evidence_page(logged_in_client):
 
     logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
     response = logged_in_client.get(
-        "/evidence?tab=candidates&validation_state=rejected_source_policy&sort=oldest"
+        "/evidence?tab=candidates&lifecycle=processed&validation_state=rejected_source_policy&sort=oldest"
     )
 
     assert response.status_code == 200
