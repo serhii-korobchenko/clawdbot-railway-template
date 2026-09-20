@@ -31,7 +31,13 @@ jobs:
         run: node --check src/start-with-prorok-api.js
 
       - name: Run PROROK tests
-        run: pytest -q tests/prorok_api prorok_dashboard/tests
+        run: |
+          pytest -q \
+            tests/test_prorok_refresh_parser.py \
+            tests/test_prorok_migration_011.py \
+            tests/test_prorok_refresh_collector.py \
+            tests/prorok_api \
+            prorok_dashboard/tests
 
   main-docker-build:
     runs-on: ubuntu-latest
