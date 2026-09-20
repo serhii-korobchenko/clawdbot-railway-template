@@ -144,6 +144,20 @@ def db_path(tmp_path):
             promoted_at TEXT NOT NULL
         );
 
+        CREATE TABLE evidence_assessment_decisions (
+            evidence_assessment_decision_id INTEGER PRIMARY KEY,
+            event_id_snapshot TEXT NOT NULL,
+            evidence_id INTEGER NOT NULL,
+            baseline_assessment_id INTEGER NOT NULL,
+            baseline_probability INTEGER NOT NULL,
+            selected_probability INTEGER NOT NULL,
+            assessment_id INTEGER NOT NULL UNIQUE,
+            run_id INTEGER NOT NULL,
+            decision_source TEXT NOT NULL,
+            actor TEXT,
+            decided_at TEXT NOT NULL
+        );
+
         CREATE TABLE refresh_user_decisions (
             decision_id INTEGER PRIMARY KEY,
             refresh_event_result_id INTEGER NOT NULL UNIQUE,
