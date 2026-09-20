@@ -1,6 +1,7 @@
 def test_official_evidence_page(logged_in_client):
     async def list_evidence(**kwargs):
         assert kwargs["direction"] == "indicator"
+        assert kwargs["sort"] == "newest"
         return {
             "items": [
                 {
@@ -46,6 +47,7 @@ def test_official_evidence_page(logged_in_client):
 def test_candidate_evidence_page(logged_in_client):
     async def list_candidate_evidence(**kwargs):
         assert kwargs["validation_state"] == "rejected_source_policy"
+        assert kwargs["sort"] == "oldest"
         return {
             "items": [
                 {
@@ -78,7 +80,7 @@ def test_candidate_evidence_page(logged_in_client):
 
     logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
     response = logged_in_client.get(
-        "/evidence?tab=candidates&validation_state=rejected_source_policy"
+        "/evidence?tab=candidates&validation_state=rejected_source_policy&sort=oldest"
     )
 
     assert response.status_code == 200
@@ -87,6 +89,7 @@ def test_candidate_evidence_page(logged_in_client):
     assert "rejected_source_policy" in response.text
     assert "domain is banned" in response.text
     assert "Refresh #24" in response.text
+    assert "Старі спочатку" in response.text
 
 
 def test_evidence_requires_authentication(client):
