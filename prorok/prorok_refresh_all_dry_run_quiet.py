@@ -169,6 +169,25 @@ def create_refresh_batch(
     with connect(db_path) as conn:
         require_refresh_schema(conn)
         with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                """
+                SELECT refresh_id, trigger_source, status, phase
+                FROM refresh_runs
+                WHERE phase != 'done'
+                ORDER BY refresh_id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if existing is not None:
+                raise RuntimeError(
+                    "refresh already running: "
+                    f"#{existing['refresh_id']} "
+                    f"source={existing['trigger_source']} "
+                    f"status={existing['status']} "
+                    f"phase={existing['phase']}"
+                )
+
             cur = conn.execute(
                 """
                 INSERT INTO refresh_runs(
