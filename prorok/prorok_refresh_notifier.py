@@ -12,6 +12,7 @@ DEFAULT_DB = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 TYPE = "telegram_completion"
+SENDING_STALE_SECONDS = 120
 
 def _connect(db: Path) -> sqlite3.Connection:
     conn=sqlite3.connect(str(db), timeout=30)
@@ -45,8 +46,18 @@ def _claim(conn: sqlite3.Connection, refresh_id: int) -> bool:
         "SELECT status FROM refresh_notifications WHERE refresh_id=? AND notification_type=?",
         (refresh_id, TYPE),
     ).fetchone()
-    if row is None or row["status"] in {"sent","sending"}:
+    if row is None or row["status"] == "sent":
         conn.commit(); return False
+    if row["status"] == "sending":
+        stale = conn.execute(
+            """SELECT 1 FROM refresh_notifications
+               WHERE refresh_id=? AND notification_type=?
+                 AND last_attempt_at IS NOT NULL
+                 AND julianday(last_attempt_at) <= julianday('now') - (? / 86400.0)""",
+            (refresh_id, TYPE, SENDING_STALE_SECONDS),
+        ).fetchone()
+        if stale is None:
+            conn.commit(); return False
     conn.execute(
         """UPDATE refresh_notifications
            SET status='sending', attempts=attempts+1,
@@ -69,9 +80,17 @@ def notify_completed_telegram_refreshes(db: Path=DEFAULT_DB) -> dict[str,int]:
                WHERE r.trigger_source='telegram'
                  AND r.phase='done'
                  AND r.status IN ('completed','partial','failed')
-                 AND (n.notification_id IS NULL OR n.status IN ('pending','failed'))
+                 AND (
+                     n.notification_id IS NULL
+                     OR n.status IN ('pending','failed')
+                     OR (
+                         n.status='sending'
+                         AND n.last_attempt_at IS NOT NULL
+                         AND julianday(n.last_attempt_at) <= julianday('now') - (? / 86400.0)
+                     )
+                 )
                ORDER BY r.refresh_id""",
-            (TYPE,),
+            (TYPE, SENDING_STALE_SECONDS),
         ).fetchall()
 
     target=os.getenv("PROROK_TELEGRAM_CHAT_ID", DEFAULT_CHAT_ID)
