@@ -139,7 +139,7 @@ def test_candidate_evidence_promoted_lifecycle(logged_in_client):
         }
 
     logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
-    response = logged_in_client.get("/evidence?tab=candidates")
+    response = logged_in_client.get("/evidence?tab=candidates&lifecycle=processed")
 
     assert response.status_code == 200
     assert "Decision: keep_current · 35%" in response.text
@@ -150,3 +150,81 @@ def test_evidence_requires_authentication(client):
     response = client.get("/evidence", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
+
+
+def test_candidate_evidence_defaults_to_pending(logged_in_client):
+    async def list_candidate_evidence(**kwargs):
+        return {
+            "items": [
+                {
+                    "candidate_id": 1,
+                    "refresh_event_result_id": 1,
+                    "refresh_id": 1,
+                    "event_id": "event-1",
+                    "event_title": "Test event",
+                    "ordinal": 1,
+                    "direction": "indicator",
+                    "strength": "medium",
+                    "relevance": 80,
+                    "credibility": 80,
+                    "title": "Pending candidate",
+                    "source": "Source",
+                    "url": "https://example.com/pending",
+                    "published_at": None,
+                    "summary": "Pending summary",
+                    "why_it_matters": None,
+                    "duplicate_risk": "low",
+                    "freshness": "new",
+                    "validation_state": "accepted",
+                    "rejection_reason": None,
+                    "created_at": "2026-09-20T10:00:00Z",
+                    "decision_id": None,
+                    "decision_type": None,
+                    "selected_probability": None,
+                    "decided_at": None,
+                    "promotion_action": None,
+                    "evidence_id": None,
+                    "promoted_at": None,
+                },
+                {
+                    "candidate_id": 2,
+                    "refresh_event_result_id": 2,
+                    "refresh_id": 1,
+                    "event_id": "event-1",
+                    "event_title": "Test event",
+                    "ordinal": 2,
+                    "direction": "counterindicator",
+                    "strength": "weak",
+                    "relevance": 70,
+                    "credibility": 70,
+                    "title": "Processed candidate",
+                    "source": "Source",
+                    "url": "https://example.com/processed",
+                    "published_at": None,
+                    "summary": "Processed summary",
+                    "why_it_matters": None,
+                    "duplicate_risk": "low",
+                    "freshness": "new",
+                    "validation_state": "accepted",
+                    "rejection_reason": None,
+                    "created_at": "2026-09-20T09:00:00Z",
+                    "decision_id": 5,
+                    "decision_type": "keep_current",
+                    "selected_probability": 35,
+                    "decided_at": "2026-09-20T11:00:00Z",
+                    "promotion_action": "inserted",
+                    "evidence_id": 18,
+                    "promoted_at": "2026-09-20T11:00:01Z",
+                },
+            ],
+            "total": 2,
+            "filtered_total": 2,
+        }
+
+    logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
+    response = logged_in_client.get("/evidence?tab=candidates")
+
+    assert response.status_code == 200
+    assert "Pending candidate" in response.text
+    assert "Processed candidate" not in response.text
+    assert "Очікують рішення" in response.text
