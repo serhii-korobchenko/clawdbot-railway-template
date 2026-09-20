@@ -14,6 +14,7 @@ EvidenceTab = Literal["official", "candidates"]
 DirectionQuery = Literal["", "indicator", "counterindicator", "neutral"]
 CandidateDirectionQuery = Literal["", "indicator", "counterindicator"]
 StrengthQuery = Literal["", "weak", "medium", "strong"]
+SortQuery = Literal["newest", "oldest"]
 ValidationStateQuery = Literal[
     "",
     "legacy_unvalidated",
@@ -34,6 +35,7 @@ async def evidence_page(
     validation_state: ValidationStateQuery | None = Query(default=None),
     source: str | None = Query(default=None, max_length=300),
     q: str | None = Query(default=None, max_length=300),
+    sort: SortQuery = Query(default="newest"),
 ):
     if not is_authenticated(request):
         return RedirectResponse("/login", status_code=303)
@@ -56,6 +58,7 @@ async def evidence_page(
                 validation_state=normalized_validation_state,
                 source=normalized_source,
                 q=normalized_q,
+                sort=sort,
             )
         else:
             data = await request.app.state.prorok_api.list_evidence(
@@ -64,6 +67,7 @@ async def evidence_page(
                 strength=normalized_strength,
                 source=normalized_source,
                 q=normalized_q,
+                sort=sort,
             )
     except (UpstreamUnavailable, UpstreamError):
         return templates.TemplateResponse(
@@ -92,5 +96,6 @@ async def evidence_page(
             "validation_state": normalized_validation_state or "",
             "source": normalized_source or "",
             "q": normalized_q or "",
+            "sort": sort,
         },
     )
