@@ -51,3 +51,43 @@ def test_notifier_retries_failed_delivery(tmp_path: Path):
     conn=sqlite3.connect(db)
     assert conn.execute("SELECT status,attempts FROM refresh_notifications").fetchone()==("sent",2)
     conn.close()
+
+
+def test_notifier_recovers_stale_sending_after_process_crash(tmp_path: Path):
+    db=tmp_path/"db.sqlite3"; make_db(db)
+    conn=sqlite3.connect(db)
+    conn.execute(
+        """INSERT INTO refresh_notifications(
+               refresh_id,notification_type,status,attempts,last_attempt_at
+           ) VALUES(45,'telegram_completion','sending',1,'2026-01-01T00:00:00.000Z')"""
+    )
+    conn.commit(); conn.close()
+    with patch("prorok.prorok_refresh_notifier.subprocess.run") as run:
+        run.return_value.returncode=0
+        result=notify_completed_telegram_refreshes(db)
+    assert result["sent"]==1
+    assert run.call_count==1
+    conn=sqlite3.connect(db)
+    row=conn.execute(
+        "SELECT status,attempts FROM refresh_notifications WHERE refresh_id=45"
+    ).fetchone()
+    assert row==("sent",2)
+    conn.close()
+
+
+def test_notifier_does_not_duplicate_fresh_sending(tmp_path: Path):
+    db=tmp_path/"db.sqlite3"; make_db(db)
+    conn=sqlite3.connect(db)
+    conn.execute(
+        """INSERT INTO refresh_notifications(
+               refresh_id,notification_type,status,attempts,last_attempt_at
+           ) VALUES(
+               45,'telegram_completion','sending',1,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now')
+           )"""
+    )
+    conn.commit(); conn.close()
+    with patch("prorok.prorok_refresh_notifier.subprocess.run") as run:
+        result=notify_completed_telegram_refreshes(db)
+    assert result["sent"]==0
+    assert run.call_count==0
