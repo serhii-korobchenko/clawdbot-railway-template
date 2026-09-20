@@ -301,8 +301,36 @@ async function recommendationPresentation(eventId) {
       ),
     );
 
+    const resultId = rec.refresh_event_result_id;
+    try {
+      const candidateData = await apiGet(
+        `/api/v1/evidence/candidates?event_id=${encodeURIComponent(eventId)}&validation_state=accepted&sort=newest`,
+      );
+      const sourceCandidates = (Array.isArray(candidateData.items) ? candidateData.items : []).filter(
+        (item) =>
+          Number(item.refresh_event_result_id) === Number(resultId) &&
+          item.url,
+      );
+      if (sourceCandidates.length) {
+        blocks.push(textBlock("Джерела Candidate Evidence:"));
+        for (const [index, item] of sourceCandidates.entries()) {
+          const sourceLabel = shortText(item.source || item.title || `Джерело #${index + 1}`, 55);
+          blocks.push(
+            buttonsBlock([
+              {
+                type: "url",
+                label: `🔗 ${sourceLabel}`.slice(0, 64),
+                url: item.url,
+              },
+            ]),
+          );
+        }
+      }
+    } catch {
+      // Recommendation remains usable even if candidate source lookup is unavailable.
+    }
+
     if (rec.actionable) {
-      const resultId = rec.refresh_event_result_id;
       blocks.push(
         buttonsBlock([
           button(
