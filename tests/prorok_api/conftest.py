@@ -107,6 +107,25 @@ def db_path(tmp_path):
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE refresh_candidate_evidence (
+            candidate_id INTEGER PRIMARY KEY,
+            refresh_event_result_id INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            direction TEXT,
+            strength TEXT,
+            relevance INTEGER,
+            credibility INTEGER,
+            title TEXT,
+            source TEXT,
+            url TEXT,
+            summary TEXT,
+            why_it_matters TEXT,
+            duplicate_risk TEXT,
+            freshness TEXT,
+            created_at TEXT NOT NULL,
+            validation_state TEXT NOT NULL DEFAULT 'pending'
+        );
+
         CREATE TABLE refresh_user_decisions (
             decision_id INTEGER PRIMARY KEY,
             refresh_event_result_id INTEGER NOT NULL UNIQUE,
