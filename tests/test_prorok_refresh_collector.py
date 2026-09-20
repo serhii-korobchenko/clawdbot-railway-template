@@ -318,6 +318,12 @@ def test_collect_positive_transcript(tmp_path: Path) -> None:
     assert result["job_state"] == "completed"
     assert result["outcome"] == "new_evidence"
     assert result["recommended_probability"] == 30
+    assert result["probability_delta"] == 10
+    assert result["net_evidence_direction"] == "positive"
+    assert result["net_evidence_impact"] == "moderate"
+    assert result["baseline_incorporation"] == "medium"
+    assert result["category_transition"] == 1
+    assert result["delta_justification"] == "Новий незалежний сигнал виправдовує підвищення на 10 п.п. і перехід до наступної категорії."
     assert result["do_not_write"] == 1
     assert result["source_run_key"]
     assert result["transcript_sha256"]
