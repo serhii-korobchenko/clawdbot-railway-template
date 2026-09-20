@@ -21,7 +21,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--to", default=batch.DEFAULT_CHAT_ID)
     parser.add_argument("--thread-id", default=batch.DEFAULT_THREAD_ID)
     parser.add_argument("--at", default=batch.DEFAULT_START_AT)
-    parser.add_argument("--agent", default="main")
+    parser.add_argument("--agent", default="prorok-refresh")
     parser.add_argument("--timeout-seconds", type=int, default=batch.DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=batch.DEFAULT_TOOLS)
     parser.add_argument("--evidence-limit", type=int, default=12)
