@@ -250,10 +250,21 @@ def list_candidate_evidence(
             c.freshness,
             c.validation_state,
             c.rejection_reason,
-            c.created_at
+            c.created_at,
+            d.decision_id,
+            d.decision_type,
+            d.selected_probability,
+            d.decided_at,
+            p.promotion_action,
+            p.evidence_id AS promoted_evidence_id,
+            p.promoted_at
         FROM refresh_candidate_evidence c
         JOIN refresh_event_results rer
           ON rer.refresh_event_result_id = c.refresh_event_result_id
+        LEFT JOIN refresh_user_decisions d
+          ON d.refresh_event_result_id = c.refresh_event_result_id
+        LEFT JOIN refresh_candidate_promotions p
+          ON p.candidate_id = c.candidate_id
         {where_sql}
         ORDER BY c.created_at {order_direction}, c.candidate_id {order_direction}
         """,
@@ -286,6 +297,13 @@ def list_candidate_evidence(
             "validation_state": row["validation_state"],
             "rejection_reason": row["rejection_reason"],
             "created_at": row["created_at"],
+            "decision_id": row["decision_id"],
+            "decision_type": row["decision_type"],
+            "selected_probability": row["selected_probability"],
+            "decided_at": row["decided_at"],
+            "promotion_action": row["promotion_action"],
+            "evidence_id": row["promoted_evidence_id"],
+            "promoted_at": row["promoted_at"],
         }
         for row in rows
     ]
