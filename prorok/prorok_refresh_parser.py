@@ -128,7 +128,11 @@ def parse_refresh_report(report,*,expected_event_id=None,expected_baseline_proba
     h=_block(lines[1:ci],HEADER_KEYS,"header"); event_id=_nonempty(h["event_id"],"event_id"); baseline=_parse_percent(h["baseline_probability"],"baseline_probability"); _scale(baseline)
     if expected_event_id is not None and event_id!=expected_event_id:raise RefreshParseError(f"event_id mismatch: expected {expected_event_id!r}, got {event_id!r}")
     if expected_baseline_probability is not None and baseline!=expected_baseline_probability:raise RefreshParseError(f"baseline_probability mismatch: expected {expected_baseline_probability}, got {baseline}")
-    candidates,no_reason,outcome=_parse_candidates(lines[ci+1:ai]); a=_block(lines[ai+1:di],ASSESSMENT_KEYS,"ASSESSMENT_RECOMMENDATION")
+    candidates,no_reason,outcome=_parse_candidates(lines[ci+1:ai]); assessment_lines=lines[ai+1:di]
+    if outcome=="no_new_evidence":
+        present={p[0] for raw in assessment_lines if (p:=_split(raw.strip())) and p[0] in ASSESSMENT_KEYS}
+        assessment_lines=[*assessment_lines,*[f"{key}: n/a" for key in ("probability_delta","net_evidence_direction","net_evidence_impact","baseline_incorporation","category_transition","delta_justification") if key not in present]]
+    a=_block(assessment_lines,ASSESSMENT_KEYS,"ASSESSMENT_RECOMMENDATION")
     rp=_parse_percent(a["recommended_probability"],"recommended_probability",allow_na=True); band=None if a["recommended_band"].lower()=="n/a" else a["recommended_band"].strip(); label=None if a["recommended_label"].lower()=="n/a" else _nonempty(a["recommended_label"],"recommended_label")
     conf=a["confidence"].lower()
     if conf not in ALLOWED_CONFIDENCE:raise RefreshParseError(f"invalid confidence: {a['confidence']!r}")
