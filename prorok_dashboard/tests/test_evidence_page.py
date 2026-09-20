@@ -72,6 +72,13 @@ def test_candidate_evidence_page(logged_in_client):
                     "validation_state": "rejected_source_policy",
                     "rejection_reason": "domain is banned",
                     "created_at": "2026-09-17T08:35:00Z",
+                    "decision_id": None,
+                    "decision_type": None,
+                    "selected_probability": None,
+                    "decided_at": None,
+                    "promotion_action": None,
+                    "evidence_id": None,
+                    "promoted_at": None,
                 }
             ],
             "total": 5,
@@ -90,6 +97,53 @@ def test_candidate_evidence_page(logged_in_client):
     assert "domain is banned" in response.text
     assert "Refresh #24" in response.text
     assert "Старі спочатку" in response.text
+    assert "Decision: not applicable" in response.text
+    assert "Official evidence: not promoted" in response.text
+
+
+def test_candidate_evidence_promoted_lifecycle(logged_in_client):
+    async def list_candidate_evidence(**kwargs):
+        return {
+            "items": [{
+                "candidate_id": 28,
+                "refresh_event_result_id": 99,
+                "refresh_id": 44,
+                "event_id": "event-1",
+                "event_title": "Test event",
+                "ordinal": 1,
+                "direction": "indicator",
+                "strength": "strong",
+                "relevance": 90,
+                "credibility": 85,
+                "title": "Accepted candidate",
+                "source": "Trusted source",
+                "url": "https://example.com/item",
+                "published_at": "2026-09-17T10:00:00Z",
+                "summary": "Accepted summary",
+                "why_it_matters": "Material signal",
+                "duplicate_risk": "low",
+                "freshness": "new",
+                "validation_state": "accepted",
+                "rejection_reason": None,
+                "created_at": "2026-09-17T11:00:00Z",
+                "decision_id": 12,
+                "decision_type": "keep_current",
+                "selected_probability": 35,
+                "decided_at": "2026-09-17T12:00:00Z",
+                "promotion_action": "inserted",
+                "evidence_id": 123,
+                "promoted_at": "2026-09-17T12:00:01Z",
+            }],
+            "total": 1,
+            "filtered_total": 1,
+        }
+
+    logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
+    response = logged_in_client.get("/evidence?tab=candidates")
+
+    assert response.status_code == 200
+    assert "Decision: keep_current · 35%" in response.text
+    assert "Official evidence: Evidence #123 · inserted" in response.text
 
 
 def test_evidence_requires_authentication(client):
