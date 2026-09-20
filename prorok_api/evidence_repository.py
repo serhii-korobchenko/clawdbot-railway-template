@@ -80,6 +80,7 @@ def list_evidence(
     strength: str | None = None,
     source: str | None = None,
     q: str | None = None,
+    sort: str = "newest",
 ) -> dict[str, Any]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -115,6 +116,7 @@ def list_evidence(
         params.extend([needle, needle, needle, needle, needle, needle])
 
     where_sql = "WHERE " + " AND ".join(clauses) if clauses else ""
+    order_direction = "ASC" if sort == "oldest" else "DESC"
     rows = conn.execute(
         f"""
         SELECT
@@ -140,7 +142,7 @@ def list_evidence(
         JOIN events e ON e.event_id = ei.event_id
         JOIN sources s ON s.source_id = ei.source_id
         {where_sql}
-        ORDER BY ei.created_at DESC, ei.evidence_id DESC
+        ORDER BY ei.created_at {order_direction}, ei.evidence_id {order_direction}
         """,
         params,
     ).fetchall()
@@ -185,6 +187,7 @@ def list_candidate_evidence(
     validation_state: str | None = None,
     source: str | None = None,
     q: str | None = None,
+    sort: str = "newest",
 ) -> dict[str, Any]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -223,6 +226,7 @@ def list_candidate_evidence(
         params.extend([needle, needle, needle, needle, needle, needle, needle])
 
     where_sql = "WHERE " + " AND ".join(clauses) if clauses else ""
+    order_direction = "ASC" if sort == "oldest" else "DESC"
     rows = conn.execute(
         f"""
         SELECT
@@ -251,7 +255,7 @@ def list_candidate_evidence(
         JOIN refresh_event_results rer
           ON rer.refresh_event_result_id = c.refresh_event_result_id
         {where_sql}
-        ORDER BY c.created_at DESC, c.candidate_id DESC
+        ORDER BY c.created_at {order_direction}, c.candidate_id {order_direction}
         """,
         params,
     ).fetchall()
