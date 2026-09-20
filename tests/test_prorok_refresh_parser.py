@@ -261,3 +261,25 @@ def test_category_transition_is_deterministically_validated() -> None:
     report = POSITIVE_REPORT.replace("category_transition: no", "category_transition: yes")
     with pytest.raises(RefreshParseError, match="category_transition must be no"):
         parse_refresh_report(report)
+
+def test_non_grid_baseline_is_allowed_with_grid_recommendation() -> None:
+    report = (
+        POSITIVE_REPORT
+        .replace("baseline_probability: 60%", "baseline_probability: 19%")
+        .replace("recommended_probability: 65%", "recommended_probability: 20%")
+        .replace("recommended_band: 55-75%", "recommended_band: 10-20%")
+        .replace("recommended_label: Ймовірно", "recommended_label: Ймовірність низька")
+        .replace("probability_delta: 5", "probability_delta: 1")
+    )
+
+    result = parse_refresh_report(
+        report,
+        expected_baseline_probability=19,
+    )
+
+    assert result.baseline_probability == 19
+    assert result.recommended_probability == 20
+    assert result.probability_delta == 1
+    assert result.recommended_band == "10-20%"
+    assert result.category_transition is False
+
