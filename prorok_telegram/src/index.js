@@ -312,21 +312,15 @@ async function recommendationPresentation(eventId) {
           item.url,
       );
       if (sourceCandidates.length) {
-        blocks.push(textBlock("Джерела Candidate Evidence:"));
-        for (const [index, item] of sourceCandidates.entries()) {
-          const sourceLabel = shortText(item.source || item.title || `Джерело #${index + 1}`, 55);
-          blocks.push(
-            buttonsBlock([
-              {
-                label: `🔗 ${sourceLabel}`.slice(0, 64),
-                action: {
-                  type: "url",
-                  url: item.url,
-                },
-              },
-            ]),
-          );
-        }
+        const sourceLines = sourceCandidates.flatMap((item, index) => {
+          const sourceLabel = shortText(item.source || item.title || `Джерело #${index + 1}`, 120);
+          return [`${index + 1}. ${sourceLabel}`, item.url];
+        });
+        blocks.push(
+          textBlock(
+            ["Джерела Candidate Evidence:", "", ...sourceLines].join("\n"),
+          ),
+        );
       }
     } catch {
       // Recommendation remains usable even if candidate source lookup is unavailable.
