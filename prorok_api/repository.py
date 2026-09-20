@@ -229,7 +229,12 @@ def get_event_detail(
             d.baseline_probability,
             d.selected_probability,
             d.assessment_id AS decision_assessment_id,
-            d.decided_at
+            d.decided_at,
+            em.evidence_assessment_decision_id AS manual_decision_id,
+            em.baseline_probability AS manual_baseline_probability,
+            em.selected_probability AS manual_selected_probability,
+            em.assessment_id AS manual_assessment_id,
+            em.decided_at AS manual_decided_at
         FROM evidence_items ei
         JOIN sources s
           ON s.source_id = ei.source_id
@@ -239,6 +244,14 @@ def get_event_detail(
           ON d.decision_id = p.decision_id
         LEFT JOIN refresh_event_results rer
           ON rer.refresh_event_result_id = p.refresh_event_result_id
+        LEFT JOIN evidence_assessment_decisions em
+          ON em.evidence_assessment_decision_id = (
+              SELECT em2.evidence_assessment_decision_id
+              FROM evidence_assessment_decisions em2
+              WHERE em2.evidence_id = ei.evidence_id
+              ORDER BY em2.decided_at DESC, em2.evidence_assessment_decision_id DESC
+              LIMIT 1
+          )
         WHERE ei.event_id = ?
         ORDER BY ei.created_at ASC, ei.evidence_id ASC
         """,
@@ -283,22 +296,23 @@ def get_event_detail(
             },
             "assessment": {
                 "status": (
-                    "unknown"
-                    if row["decision_id"] is None
+                    ("assessed_unchanged" if int(row["manual_selected_probability"]) == int(row["manual_baseline_probability"]) else "assessed_changed")
+                    if row["manual_decision_id"] is not None
                     else (
-                        "assessed_unchanged"
-                        if int(row["selected_probability"]) == int(row["baseline_probability"])
-                        else "assessed_changed"
+                        "unknown" if row["decision_id"] is None
+                        else ("assessed_unchanged" if int(row["selected_probability"]) == int(row["baseline_probability"]) else "assessed_changed")
                     )
                 ),
-                "refresh_id": row["refresh_id"],
-                "refresh_event_result_id": row["refresh_event_result_id"],
-                "decision_id": row["decision_id"],
-                "decision_type": row["decision_type"],
-                "baseline_probability": row["baseline_probability"],
-                "selected_probability": row["selected_probability"],
-                "assessment_id": row["decision_assessment_id"],
-                "decided_at": row["decided_at"],
+                "provenance_type": "evidence_manual" if row["manual_decision_id"] is not None else ("refresh" if row["decision_id"] is not None else None),
+                "evidence_assessment_decision_id": row["manual_decision_id"],
+                "refresh_id": None if row["manual_decision_id"] is not None else row["refresh_id"],
+                "refresh_event_result_id": None if row["manual_decision_id"] is not None else row["refresh_event_result_id"],
+                "decision_id": None if row["manual_decision_id"] is not None else row["decision_id"],
+                "decision_type": "evidence_manual" if row["manual_decision_id"] is not None else row["decision_type"],
+                "baseline_probability": row["manual_baseline_probability"] if row["manual_decision_id"] is not None else row["baseline_probability"],
+                "selected_probability": row["manual_selected_probability"] if row["manual_decision_id"] is not None else row["selected_probability"],
+                "assessment_id": row["manual_assessment_id"] if row["manual_decision_id"] is not None else row["decision_assessment_id"],
+                "decided_at": row["manual_decided_at"] if row["manual_decision_id"] is not None else row["decided_at"],
             },
         }
         for row in evidence_rows
@@ -326,7 +340,7 @@ def get_event_detail(
         "assessments": assessments,
         "evidence": evidence,
         "limitations": {
-            "assessment_evidence_attribution": "refresh_lifecycle_only",
+            "assessment_evidence_attribution": "refresh_and_manual_provenance",
         },
     }
 
