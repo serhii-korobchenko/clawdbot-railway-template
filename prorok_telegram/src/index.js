@@ -1425,7 +1425,7 @@ async function candidatesPresentation() {
       );
       blocks.push(
         buttonsBlock([
-          button("🎯 Розглянути рішення", `recommendation:${token}`, "primary"),
+          button(`🎯 Рішення · Refresh #${first.refresh_id}`, `recommendation:${token}`, "primary"),
         ]),
       );
     }
