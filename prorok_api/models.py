@@ -48,6 +48,18 @@ class SourceDTO(BaseModel):
     source_type: str | None
 
 
+class EvidenceAssessmentDTO(BaseModel):
+    status: Literal["assessed_changed", "assessed_unchanged", "unknown"]
+    refresh_id: int | None = None
+    refresh_event_result_id: int | None = None
+    decision_id: int | None = None
+    decision_type: RefreshDecisionType | None = None
+    baseline_probability: int | None = None
+    selected_probability: int | None = None
+    assessment_id: int | None = None
+    decided_at: str | None = None
+
+
 class EvidenceDTO(BaseModel):
     evidence_id: int
     run_id: int | None
@@ -58,6 +70,7 @@ class EvidenceDTO(BaseModel):
     relevance: int | None
     credibility: int | None
     source: SourceDTO
+    assessment: EvidenceAssessmentDTO
 
 
 class EventSummaryDTO(BaseModel):
@@ -101,7 +114,7 @@ class EventDTO(BaseModel):
 
 
 class LimitationsDTO(BaseModel):
-    assessment_evidence_attribution: Literal["unavailable"] = "unavailable"
+    assessment_evidence_attribution: Literal["refresh_lifecycle_only"] = "refresh_lifecycle_only"
 
 
 class EventDetailResponse(BaseModel):
