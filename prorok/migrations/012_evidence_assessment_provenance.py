@@ -66,7 +66,9 @@ def main():
                 return 1
             print("PROROK migration v12 check: ok"); return 0
         if before not in {"11","12"}: raise RuntimeError(f"expected schema_version 11 or 12 before migration, got {before!r}")
-        c.execute("BEGIN IMMEDIATE"); c.executescript(DDL)
+        c.execute("BEGIN IMMEDIATE")
+        for statement in DDL.split(";"):
+            if statement.strip(): c.execute(statement)
         c.execute("""INSERT INTO meta(key,value) VALUES('schema_version',?)
           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')""",(TARGET_VERSION,))
         errors=validate(c)
