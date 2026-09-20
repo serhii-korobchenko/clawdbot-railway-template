@@ -148,6 +148,78 @@ def test_accepted_recommendation_is_decided_not_stale(
     assert rec["decision"]["selected_probability"] == 45
     assert rec["decision"]["assessment_id"] == 2
 
+
+def test_no_change_with_accepted_candidate_can_keep_current(
+    client,
+    auth_headers,
+    db_path,
+):
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        UPDATE refresh_event_results
+        SET recommended_probability = baseline_probability,
+            change_recommended = 0,
+            outcome = 'new_evidence'
+        WHERE refresh_event_result_id = 100
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO refresh_candidate_evidence(
+            refresh_event_result_id,
+            ordinal,
+            direction,
+            strength,
+            relevance,
+            credibility,
+            title,
+            source,
+            url,
+            summary,
+            why_it_matters,
+            duplicate_risk,
+            freshness,
+            created_at,
+            validation_state
+        ) VALUES (
+            100,
+            1,
+            'indicator',
+            'medium',
+            4,
+            4,
+            'Accepted candidate',
+            'Test source',
+            'https://example.com/accepted-candidate',
+            'Validated evidence without a forecast change.',
+            'Relevant to the event.',
+            'low',
+            'fresh',
+            '2026-06-02T12:00:00Z',
+            'accepted'
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get(
+        "/api/v1/events/active_event/latest-recommendation",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    rec = response.json()["recommendation"]
+    assert rec["status"] == "no_change"
+    assert rec["change_recommended"] is False
+    assert rec["actionable"] is False
+    assert rec["is_stale"] is False
+    assert rec["accepted_candidate_count"] == 1
+    assert rec["can_keep_current"] is True
+    assert rec["decision"] is None
+
+
 def test_latest_recommendation_detects_stale_baseline(
     client,
     auth_headers,
