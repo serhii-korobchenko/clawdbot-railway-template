@@ -32,6 +32,8 @@ jobs:
         run: node --check src/start-with-prorok-api.js
 
       - name: Run PROROK tests
+        env:
+          PYTHONPATH: .
         run: |
           pytest -q \
             tests/test_prorok_refresh_parser.py \
