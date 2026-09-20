@@ -92,7 +92,6 @@ class ProrokApiClient:
         *,
         status: str | None = None,
         q: str | None = None,
-        sort: str = "newest",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if status:
@@ -140,6 +139,7 @@ class ProrokApiClient:
         validation_state: str | None = None,
         source: str | None = None,
         q: str | None = None,
+        sort: str = "newest",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if event_id:
