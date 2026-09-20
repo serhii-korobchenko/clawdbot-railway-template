@@ -120,6 +120,19 @@
     <p class="evidence-summary">{{ item.summary }}</p>
 
     <div class="quality-metrics">
+      {% if item.assessment.status == 'assessed_changed' %}
+      <span>Оцінено · прогноз змінено: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>
+      {% elif item.assessment.status == 'assessed_unchanged' %}
+      <span>Оцінено · без зміни: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>
+      {% else %}
+      <span>Статус оцінки невідомий</span>
+      {% endif %}
+      {% if item.assessment.refresh_id is not none %}<span>Refresh #{{ item.assessment.refresh_id }}</span>{% endif %}
+      {% if item.assessment.assessment_id is not none %}<span>Assessment #{{ item.assessment.assessment_id }}</span>{% endif %}
+      {% if item.assessment.decided_at %}<span>{{ item.assessment.decided_at|fmt_datetime }}</span>{% endif %}
+    </div>
+
+    <div class="quality-metrics">
       <span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span>
       <span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span>
       <span>Evidence #{{ item.evidence_id }}</span>
