@@ -55,6 +55,15 @@
 
   {% if tab == 'candidates' %}
   <label>
+    <span>Стан candidate</span>
+    <select name="lifecycle">
+      <option value="pending" {% if lifecycle == 'pending' %}selected{% endif %}>Очікують рішення</option>
+      <option value="processed" {% if lifecycle == 'processed' %}selected{% endif %}>Оброблені</option>
+      <option value="all" {% if lifecycle == 'all' %}selected{% endif %}>Усі</option>
+    </select>
+  </label>
+
+  <label>
     <span>Validation</span>
     <select name="validation_state">
       <option value="">Усі</option>
