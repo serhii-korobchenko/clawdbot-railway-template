@@ -190,6 +190,29 @@ def test_neutral_direction_is_rejected_until_schema_contract_changes() -> None:
         parse_refresh_report(report)
 
 
+def test_no_evidence_missing_calibration_fields_are_normalized() -> None:
+    report = NO_EVIDENCE_REPORT
+    for key in (
+        "probability_delta",
+        "net_evidence_direction",
+        "net_evidence_impact",
+        "baseline_incorporation",
+        "category_transition",
+        "delta_justification",
+    ):
+        report = "\n".join(line for line in report.split("\n") if not line.startswith(f"{key}:"))
+
+    result = parse_refresh_report(report)
+
+    assert result.outcome == "no_new_evidence"
+    assert result.probability_delta is None
+    assert result.net_evidence_direction is None
+    assert result.net_evidence_impact is None
+    assert result.baseline_incorporation is None
+    assert result.category_transition is None
+    assert result.delta_justification is None
+
+
 def test_no_evidence_cannot_recommend_probability() -> None:
     report = NO_EVIDENCE_REPORT.replace(
         "recommended_probability: n/a",
