@@ -1136,7 +1136,7 @@ async function evidenceAssessmentConfirmPresentation(eventId,evidenceId,baseline
 async function appliedEvidenceAssessmentPresentation(eventId,evidenceId,baselineAssessmentId,probability,ctx){
   const token=eventToken(eventId);
   const args=[EVIDENCE_ASSESSMENT_CLI,"--db",PROROK_DB_PATH,eventId,String(evidenceId),"--baseline-assessment-id",String(baselineAssessmentId),"--probability",String(probability),"--source","telegram"];
-  const actor=telegramActor(ctx); if(actor) args.push("--actor",String(actor));
+  const actor=telegramActorSnapshot(ctx); if(actor) args.push("--actor",String(actor));
   try{ await execFileAsync(PYTHON_BIN,args,{timeout:20000,maxBuffer:64*1024,env:process.env}); }
   catch(error){ return {title:"PROROK · Переоцінку не застосовано",tone:"neutral",blocks:[textBlock([decisionErrorText(error),"","Жодних змін не виконано."].join("\n")),buttonsBlock([button("🧾 Evidence події",`event-evidence:${token}`)])]}; }
   const after=await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
