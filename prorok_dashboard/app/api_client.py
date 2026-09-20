@@ -92,6 +92,7 @@ class ProrokApiClient:
         *,
         status: str | None = None,
         q: str | None = None,
+        sort: str = "newest",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if status:
@@ -108,6 +109,7 @@ class ProrokApiClient:
         strength: str | None = None,
         source: str | None = None,
         q: str | None = None,
+        sort: str = "newest",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
         if event_id:
@@ -120,6 +122,7 @@ class ProrokApiClient:
             params["source"] = source
         if q:
             params["q"] = q
+        params["sort"] = sort
         return await self._get("/api/v1/evidence", params=params)
 
     async def get_evidence_activity(self, *, status: str = "active", window: str = "7d") -> dict[str, Any]:
@@ -151,6 +154,7 @@ class ProrokApiClient:
             params["source"] = source
         if q:
             params["q"] = q
+        params["sort"] = sort
         return await self._get("/api/v1/evidence/candidates", params=params)
 
     async def get_latest_refresh(self) -> dict[str, Any]:
