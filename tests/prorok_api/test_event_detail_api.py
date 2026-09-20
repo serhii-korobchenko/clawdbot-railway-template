@@ -10,7 +10,7 @@ def test_detail_includes_history_evidence_and_limitations(client, auth_headers):
     assert payload["assessments"][0]["rationale"] == "Because."
     assert payload["evidence"][0]["direction"] == "indicator"
     assert payload["evidence"][0]["source"]["published_at"] is None
-    assert payload["limitations"]["assessment_evidence_attribution"] == "refresh_lifecycle_only"
+    assert payload["limitations"]["assessment_evidence_attribution"] == "refresh_and_manual_provenance"
     assert payload["evidence"][0]["assessment"]["status"] == "unknown"
 
 
@@ -36,3 +36,28 @@ def test_no_mutating_api_routes(client):
             methods.update(getattr(route, "methods", set()))
 
     assert not (methods & {"POST", "PUT", "PATCH", "DELETE"})
+
+
+def test_manual_evidence_assessment_provenance_overrides_unknown(client, auth_headers, db_path):
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO assessments(assessment_id,event_id,run_id,assessed_at,probability_percent,probability_band,
+           probability_label,confidence,delta_from_previous,rationale)
+           VALUES(2,'active_event',12,'2026-06-03T10:00:00Z',35,'25-35%','Малоймовірно','medium',0,'Manual evidence decision.')"""
+    )
+    conn.execute(
+        """INSERT INTO evidence_assessment_decisions(
+           evidence_assessment_decision_id,event_id_snapshot,evidence_id,baseline_assessment_id,
+           baseline_probability,selected_probability,assessment_id,run_id,decision_source,actor,decided_at)
+           VALUES(1,'active_event',1,1,35,35,2,12,'telegram','test','2026-06-03T10:00:00Z')"""
+    )
+    conn.commit(); conn.close()
+    payload=client.get("/api/v1/events/active_event",headers=auth_headers).json()
+    assessment=payload["evidence"][0]["assessment"]
+    assert assessment["status"] == "assessed_unchanged"
+    assert assessment["provenance_type"] == "evidence_manual"
+    assert assessment["evidence_assessment_decision_id"] == 1
+    assert assessment["assessment_id"] == 2
+    assert assessment["baseline_probability"] == 35
+    assert assessment["selected_probability"] == 35
