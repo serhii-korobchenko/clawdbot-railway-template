@@ -133,6 +133,12 @@ class LatestRecommendationDTO(BaseModel):
     recommended_label: str | None
     recommendation_confidence: Confidence | None
     recommendation_reason: str | None
+    probability_delta: int | None
+    net_evidence_direction: Literal["positive", "negative", "balanced"] | None
+    net_evidence_impact: Literal["none", "weak", "moderate", "strong"] | None
+    baseline_incorporation: Literal["low", "medium", "high"] | None
+    category_transition: bool | None
+    delta_justification: str | None
     change_recommended: bool
     candidate_rejected_count: int
     recommendation_valid: bool
