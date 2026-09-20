@@ -15,6 +15,7 @@ DirectionQuery = Literal["", "indicator", "counterindicator", "neutral"]
 CandidateDirectionQuery = Literal["", "indicator", "counterindicator"]
 StrengthQuery = Literal["", "weak", "medium", "strong"]
 SortQuery = Literal["newest", "oldest"]
+CandidateLifecycleQuery = Literal["pending", "processed", "all"]
 ValidationStateQuery = Literal[
     "",
     "legacy_unvalidated",
@@ -33,6 +34,7 @@ async def evidence_page(
     direction: str | None = Query(default=None, max_length=40),
     strength: StrengthQuery | None = Query(default=None),
     validation_state: ValidationStateQuery | None = Query(default=None),
+    lifecycle: CandidateLifecycleQuery = Query(default="pending"),
     source: str | None = Query(default=None, max_length=300),
     q: str | None = Query(default=None, max_length=300),
     sort: SortQuery = Query(default="newest"),
@@ -60,6 +62,21 @@ async def evidence_page(
                 q=normalized_q,
                 sort=sort,
             )
+            if lifecycle != "all":
+                items = data.get("items", [])
+                if lifecycle == "pending":
+                    items = [
+                        item for item in items
+                        if item.get("validation_state") == "accepted"
+                        and not item.get("decision_type")
+                    ]
+                else:
+                    items = [
+                        item for item in items
+                        if item.get("validation_state") != "accepted"
+                        or bool(item.get("decision_type"))
+                    ]
+                data = {**data, "items": items, "filtered_total": len(items)}
         else:
             data = await request.app.state.prorok_api.list_evidence(
                 event_id=normalized_event_id,
@@ -94,6 +111,7 @@ async def evidence_page(
             "direction": normalized_direction or "",
             "strength": normalized_strength or "",
             "validation_state": normalized_validation_state or "",
+            "lifecycle": lifecycle,
             "source": normalized_source or "",
             "q": normalized_q or "",
             "sort": sort,
