@@ -326,6 +326,12 @@ def get_latest_recommendation(
             rer.change_recommended,
             rer.candidate_rejected_count,
             rer.recommendation_valid,
+            (
+                SELECT COUNT(*)
+                FROM refresh_candidate_evidence rce
+                WHERE rce.refresh_event_result_id = rer.refresh_event_result_id
+                  AND rce.validation_state = 'accepted'
+            ) AS accepted_candidate_count,
             current.assessment_id AS current_assessment_id,
             current.probability_percent AS current_probability,
             d.decision_id,
@@ -390,7 +396,14 @@ def get_latest_recommendation(
     is_stale = baseline_is_stale if decision is None else False
 
     change_recommended = bool(row["change_recommended"])
+    accepted_candidate_count = int(row["accepted_candidate_count"] or 0)
     actionable = decision is None and not is_stale and change_recommended
+    can_keep_current = (
+        decision is None
+        and not is_stale
+        and not change_recommended
+        and accepted_candidate_count > 0
+    )
 
     if decision is not None:
         status = "decided"
@@ -422,6 +435,8 @@ def get_latest_recommendation(
             "current_probability": current_probability,
             "is_stale": is_stale,
             "actionable": actionable,
+            "can_keep_current": can_keep_current,
+            "accepted_candidate_count": accepted_candidate_count,
             "status": status,
             "decision": decision,
         },
