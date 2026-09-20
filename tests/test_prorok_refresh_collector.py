@@ -637,14 +637,14 @@ def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> 
         INSERT INTO refresh_candidate_evidence(
             refresh_event_result_id,ordinal,direction,strength,relevance,
             credibility,title,source,url,published_at,summary,why_it_matters,
-            duplicate_risk,freshness
+            duplicate_risk,freshness,validation_state
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             prior_result_id, 1, "indicator", "medium", 90, 90,
             "Prior", "Example", "https://example.com/a", "2026-09-05",
-            "Prior summary", "Prior why", "low", "new_after_last_assessment",
+            "Prior summary", "Prior why", "low", "new_after_last_assessment", "accepted",
         ),
     )
     conn.commit()
