@@ -10,7 +10,8 @@ def test_detail_includes_history_evidence_and_limitations(client, auth_headers):
     assert payload["assessments"][0]["rationale"] == "Because."
     assert payload["evidence"][0]["direction"] == "indicator"
     assert payload["evidence"][0]["source"]["published_at"] is None
-    assert payload["limitations"]["assessment_evidence_attribution"] == "unavailable"
+    assert payload["limitations"]["assessment_evidence_attribution"] == "refresh_lifecycle_only"
+    assert payload["evidence"][0]["assessment"]["status"] == "unknown"
 
 
 def test_legacy_event_and_unknown(client, auth_headers):
