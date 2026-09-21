@@ -72,12 +72,14 @@ def test_wrong_evidence_event_is_rejected(tmp_path):
     else: raise AssertionError("cross-event evidence must fail")
     c.close()
 
-def test_invalid_agent_report_is_not_persisted(tmp_path):
+def test_agent_derived_delta_is_normalized_before_persistence(tmp_path):
     c=make_db(tmp_path/"p.sqlite3"); ctx=load_context(c,"event_a",8)
-    try: persist_report(c,ctx,report(probability_delta=10))
-    except CliError as exc: assert "probability_delta" in str(exc)
-    else: raise AssertionError("invalid report must fail")
-    assert c.execute("SELECT COUNT(*) FROM evidence_assessment_recommendations").fetchone()[0]==0
+    rid=persist_report(c,ctx,report(probability_delta=10))
+    row=c.execute(
+        "SELECT probability_delta FROM evidence_assessment_recommendations "
+        "WHERE evidence_assessment_recommendation_id=?",(rid,)
+    ).fetchone()
+    assert row[0]==5
     c.close()
 
 
