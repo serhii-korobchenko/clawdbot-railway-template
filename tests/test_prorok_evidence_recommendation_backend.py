@@ -18,11 +18,11 @@ def make_db(path: Path):
     CREATE TABLE events(event_id TEXT PRIMARY KEY,title TEXT,question TEXT,forecast_horizon TEXT,decision_criteria TEXT);
     CREATE TABLE runs(run_id INTEGER PRIMARY KEY);
     CREATE TABLE assessments(assessment_id INTEGER PRIMARY KEY,event_id TEXT,probability_percent INTEGER,confidence TEXT,rationale TEXT,assessed_at TEXT);
-    CREATE TABLE evidence_items(evidence_id INTEGER PRIMARY KEY,event_id TEXT,direction TEXT,strength TEXT,relevance INTEGER,credibility INTEGER,summary TEXT,why_it_matters TEXT);
+    CREATE TABLE evidence_items(evidence_id INTEGER PRIMARY KEY,event_id TEXT,source_id INTEGER,run_id INTEGER,direction TEXT,strength TEXT,summary TEXT,relevance INTEGER,credibility INTEGER,created_at TEXT);
     CREATE TABLE evidence_assessment_decisions(evidence_assessment_decision_id INTEGER PRIMARY KEY,recommendation_id INTEGER);
     INSERT INTO events VALUES('event_a','Event A','Will A happen?','2026-12-31','Resolve yes if A happens.');
     INSERT INTO assessments VALUES(12,'event_a',15,'medium','baseline','2026-09-20T00:00:00Z');
-    INSERT INTO evidence_items VALUES(8,'event_a','indicator','medium',90,85,'Official evidence summary','Material signal.');
+    INSERT INTO evidence_items(evidence_id,event_id,direction,strength,summary,relevance,credibility,created_at) VALUES(8,'event_a','indicator','medium','Official evidence summary',90,85,'2026-09-21T00:00:00Z');
     """)
     for statement in RECOMMENDATIONS_DDL.split(";"):
         if statement.strip(): c.execute(statement)
