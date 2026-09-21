@@ -224,6 +224,32 @@ def extract_agent_report(stdout: str) -> tuple[str, str | None]:
                     if isinstance(nested_value, str):
                         candidates.append(nested_value)
 
+            # OpenClaw 2026.5.22 Gateway JSON envelope:
+            # result.payloads[].text contains the agent reply.
+            payloads = result.get("payloads")
+            if isinstance(payloads, list):
+                for payload in payloads:
+                    if not isinstance(payload, dict):
+                        continue
+                    value = payload.get("text")
+                    if isinstance(value, str):
+                        candidates.append(value)
+
+            # Agent metadata may contain the effective model. Walk only
+            # dictionaries/lists and take the first non-empty "model" value.
+            if not model_used:
+                stack = [result]
+                while stack and not model_used:
+                    node = stack.pop()
+                    if isinstance(node, dict):
+                        value = node.get("model")
+                        if isinstance(value, str) and value.strip():
+                            model_used = value.strip()
+                            break
+                        stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+                    elif isinstance(node, list):
+                        stack.extend(v for v in node if isinstance(v, (dict, list)))
+
     for candidate in candidates:
         candidate = candidate.strip()
         if candidate.startswith("{") and candidate.endswith("}"):
