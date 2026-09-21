@@ -148,3 +148,10 @@ def test_openclaw_envelope_without_strict_report_is_rejected():
         assert "does not contain" in str(exc)
     else:
         raise AssertionError("plain prose must fail")
+
+
+def test_cli_exposes_non_persisting_dry_run_json_mode():
+    source=(ROOT/"prorok"/"prorok_evidence_recommendation_cli.py").read_text(encoding="utf-8")
+    assert '"--dry-run-json"' in source
+    assert "if a.dry_run_json:" in source
+    assert "print(report)" in source
