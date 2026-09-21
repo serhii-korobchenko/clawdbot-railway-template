@@ -45,10 +45,19 @@ def test_parser_validates_category_transition():
                     probability_delta=10,category_transition=True))
     assert r.category_transition is True
 
-def test_parser_rejects_wrong_delta():
-    try: parse(payload(probability_delta=10))
+def test_parser_normalizes_llm_derived_fields():
+    r=parse(payload(recommended_band="Віддалена можливість",recommended_label="wrong",
+                    probability_delta=999,change_from_baseline="no_update",category_transition=True))
+    assert r.recommended_band=="10-20%"
+    assert r.recommended_label=="Ймовірність низька"
+    assert r.probability_delta==5
+    assert r.change_from_baseline=="increase"
+    assert r.category_transition is False
+
+def test_parser_rejects_wrong_derived_field_types():
+    try: parse(payload(probability_delta="5"))
     except EvidenceRecommendationParseError: pass
-    else: raise AssertionError("wrong delta must fail")
+    else: raise AssertionError("derived fields must retain their JSON types")
 
 def test_parser_rejects_stale_identity():
     try:
