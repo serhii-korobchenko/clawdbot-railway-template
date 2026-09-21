@@ -33,7 +33,7 @@ def test_resolved_has_no_lifecycle_buttons() -> None:
 
 
 def test_selected_evidence_recommendation_ui_is_wired():
-    source=(ROOT/"prorok_telegram"/"src"/"index.js").read_text(encoding="utf-8")
+    source=PLUGIN.read_text(encoding="utf-8")
     assert "PROROK_EVIDENCE_RECOMMENDATION_CLI" in source
     assert "🤖 #${item.evidence_id} · Отримати рекомендацію" in source
     assert "🤖 Отримати рекомендацію" in source
@@ -44,6 +44,6 @@ def test_selected_evidence_recommendation_ui_is_wired():
 
 
 def test_evidence_recommendation_cli_supports_json_output():
-    source=(ROOT/"prorok"/"prorok_evidence_recommendation_cli.py").read_text(encoding="utf-8")
+    source=(Path(__file__).resolve().parent.parent/"prorok"/"prorok_evidence_recommendation_cli.py").read_text(encoding="utf-8")
     assert '"--output-json"' in source
     assert "evidence_assessment_recommendation_id" in source
