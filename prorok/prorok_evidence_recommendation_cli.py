@@ -53,7 +53,6 @@ class RecommendationContext:
     evidence_relevance: str
     evidence_credibility: str
     evidence_summary: str
-    evidence_why_it_matters: str
     baseline_assessment_id: int
     baseline_probability: int
     baseline_confidence: str
@@ -94,7 +93,7 @@ def load_context(conn: sqlite3.Connection, event_id: str, evidence_id: int) -> R
     if event is None:
         raise CliError(f"event not found: {event_id}")
     evidence = conn.execute(
-        """SELECT evidence_id,event_id,direction,strength,relevance,credibility,summary,why_it_matters
+        """SELECT evidence_id,event_id,direction,strength,relevance,credibility,summary
            FROM evidence_items WHERE evidence_id=?""", (evidence_id,)
     ).fetchone()
     if evidence is None:
@@ -120,7 +119,6 @@ def load_context(conn: sqlite3.Connection, event_id: str, evidence_id: int) -> R
         evidence_relevance=str(evidence["relevance"] if evidence["relevance"] is not None else "n/a"),
         evidence_credibility=str(evidence["credibility"] if evidence["credibility"] is not None else "n/a"),
         evidence_summary=str(evidence["summary"] or ""),
-        evidence_why_it_matters=str(evidence["why_it_matters"] or ""),
         baseline_assessment_id=int(baseline["assessment_id"]),
         baseline_probability=int(baseline["probability_percent"]),
         baseline_confidence=str(baseline["confidence"] or "medium"),
@@ -153,7 +151,6 @@ strength: {ctx.evidence_strength}
 relevance: {ctx.evidence_relevance}
 credibility: {ctx.evidence_credibility}
 summary: {ctx.evidence_summary}
-why_it_matters: {ctx.evidence_why_it_matters}
 
 CALIBRATION RULES
 - Judge novelty/independence, credibility, relevance, directness to resolution criteria, forecast horizon,
