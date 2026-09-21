@@ -157,3 +157,10 @@ def test_cli_exposes_non_persisting_dry_run_json_mode():
     assert '"--dry-run-json"' in source
     assert "if a.dry_run_json:" in source
     assert "print(report)" in source
+
+
+def test_prompt_requires_ukrainian_user_facing_explanations(tmp_path):
+    c=make_db(tmp_path/"p.sqlite3"); ctx=load_context(c,"event_a",8)
+    prompt=build_prompt(ctx)
+    assert "Always write all user-facing explanatory text in Ukrainian" in prompt
+    assert "recommendation_rationale and delta_justification MUST be in Ukrainian" in prompt
