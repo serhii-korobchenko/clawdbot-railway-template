@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Prepare and persist a PROROK recommendation for one official evidence item.
+
+Safety boundary: this module may insert evidence_assessment_recommendations only.
+It never writes events, evidence_items, assessments, or evidence_assessment_decisions.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sqlite3
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from .prorok_evidence_recommendation_parser import (
+        METHODOLOGY_VERSION,
+        PARSER_VERSION,
+        EvidenceRecommendationParseError,
+        parse_evidence_recommendation,
+    )
+except ImportError:
+    from prorok_evidence_recommendation_parser import (
+        METHODOLOGY_VERSION,
+        PARSER_VERSION,
+        EvidenceRecommendationParseError,
+        parse_evidence_recommendation,
+    )
+
+DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
+MIN_SCHEMA_VERSION = 13
+
+
+class CliError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class RecommendationContext:
+    event_id: str
+    event_title: str
+    question: str
+    forecast_horizon: str
+    decision_criteria: str
+    evidence_id: int
+    evidence_direction: str
+    evidence_strength: str
+    evidence_relevance: str
+    evidence_credibility: str
+    evidence_summary: str
+    evidence_why_it_matters: str
+    baseline_assessment_id: int
+    baseline_probability: int
+    baseline_confidence: str
+    baseline_rationale: str
+
+
+def resolve_db(explicit: str | None) -> Path:
+    return Path(explicit or os.getenv("PROROK_DB_PATH") or os.getenv("PROROK_DB") or DEFAULT_DB).expanduser().resolve()
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    if not path.exists():
+        raise CliError(f"PROROK DB not found: {path}")
+    conn = sqlite3.connect(str(path), timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def require_schema_v13(conn: sqlite3.Connection) -> None:
+    row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    try:
+        version = int(row["value"]) if row else None
+    except (TypeError, ValueError) as exc:
+        raise CliError(f"schema v13+ required; current schema_version={row['value'] if row else None!r}") from exc
+    if version is None or version < MIN_SCHEMA_VERSION:
+        raise CliError(f"schema v13+ required; current schema_version={version!r}")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_assessment_recommendations'").fetchone() is None:
+        raise CliError("schema v13 table evidence_assessment_recommendations is missing")
+
+
+def load_context(conn: sqlite3.Connection, event_id: str, evidence_id: int) -> RecommendationContext:
+    event = conn.execute(
+        """SELECT event_id,title,question,forecast_horizon,decision_criteria
+           FROM events WHERE event_id=?""", (event_id,)
+    ).fetchone()
+    if event is None:
+        raise CliError(f"event not found: {event_id}")
+    evidence = conn.execute(
+        """SELECT evidence_id,event_id,direction,strength,relevance,credibility,summary,why_it_matters
+           FROM evidence_items WHERE evidence_id=?""", (evidence_id,)
+    ).fetchone()
+    if evidence is None:
+        raise CliError(f"evidence not found: {evidence_id}")
+    if str(evidence["event_id"]) != event_id:
+        raise CliError("evidence does not belong to the requested event")
+    baseline = conn.execute(
+        """SELECT assessment_id,probability_percent,confidence,rationale
+           FROM assessments WHERE event_id=?
+           ORDER BY assessed_at DESC,assessment_id DESC LIMIT 1""", (event_id,)
+    ).fetchone()
+    if baseline is None:
+        raise CliError("event has no current assessment")
+    return RecommendationContext(
+        event_id=event_id,
+        event_title=str(event["title"] or ""),
+        question=str(event["question"] or ""),
+        forecast_horizon=str(event["forecast_horizon"] or ""),
+        decision_criteria=str(event["decision_criteria"] or ""),
+        evidence_id=int(evidence["evidence_id"]),
+        evidence_direction=str(evidence["direction"] or "neutral"),
+        evidence_strength=str(evidence["strength"] or "n/a"),
+        evidence_relevance=str(evidence["relevance"] if evidence["relevance"] is not None else "n/a"),
+        evidence_credibility=str(evidence["credibility"] if evidence["credibility"] is not None else "n/a"),
+        evidence_summary=str(evidence["summary"] or ""),
+        evidence_why_it_matters=str(evidence["why_it_matters"] or ""),
+        baseline_assessment_id=int(baseline["assessment_id"]),
+        baseline_probability=int(baseline["probability_percent"]),
+        baseline_confidence=str(baseline["confidence"] or "medium"),
+        baseline_rationale=str(baseline["rationale"] or ""),
+    )
+
+
+def build_prompt(ctx: RecommendationContext) -> str:
+    return f"""You are the PROROK forecasting calibration agent.
+Analyze ONLY the supplied official evidence in the context of the event and current baseline.
+Do not search the web. Do not create evidence. Do not write or change any official assessment.
+
+EVENT
+event_id: {ctx.event_id}
+title: {ctx.event_title}
+question: {ctx.question}
+forecast_horizon: {ctx.forecast_horizon}
+decision_criteria: {ctx.decision_criteria}
+
+CURRENT BASELINE
+baseline_assessment_id: {ctx.baseline_assessment_id}
+baseline_probability: {ctx.baseline_probability}
+confidence: {ctx.baseline_confidence}
+rationale: {ctx.baseline_rationale}
+
+OFFICIAL EVIDENCE
+evidence_id: {ctx.evidence_id}
+direction: {ctx.evidence_direction}
+strength: {ctx.evidence_strength}
+relevance: {ctx.evidence_relevance}
+credibility: {ctx.evidence_credibility}
+summary: {ctx.evidence_summary}
+why_it_matters: {ctx.evidence_why_it_matters}
+
+CALIBRATION RULES
+- Judge novelty/independence, credibility, relevance, directness to resolution criteria, forecast horizon,
+  counterevidence, magnitude, and whether the information is already incorporated in the baseline.
+- Do not mechanically count indicators/counterindicators.
+- Already-priced confirmation should not automatically move probability.
+- A qualitative-band transition requires stronger justification than movement within a band.
+- recommended_probability must be one of 0,5,10,...,100.
+- Scale: 0-5%=Віддалена можливість; 10-20%=Ймовірність низька; 25-35%=Малоймовірно;
+  40-50%=Реалістична можливість; 55-75%=Ймовірно; 80-90%=Висока ймовірність;
+  95-100%=Майже напевно.
+- probability_delta = recommended_probability - baseline_probability.
+- category_transition is true only when the qualitative band changes.
+- A no-change recommendation is valid.
+
+Return ONLY one JSON object with exactly these keys:
+event_id, evidence_id, baseline_assessment_id, baseline_probability,
+recommended_probability, recommended_band, recommended_label,
+recommendation_confidence, change_from_baseline, probability_delta,
+net_evidence_direction, net_evidence_impact, baseline_incorporation,
+category_transition, recommendation_rationale, delta_justification.
+
+Allowed enums:
+recommendation_confidence: low|medium|high
+change_from_baseline: increase|decrease|no_update
+net_evidence_direction: positive|negative|balanced
+net_evidence_impact: none|weak|moderate|strong
+baseline_incorporation: low|medium|high
+category_transition: true|false
+"""
+
+
+def ensure_baseline_current(conn: sqlite3.Connection, ctx: RecommendationContext) -> None:
+    row = conn.execute(
+        """SELECT assessment_id,probability_percent FROM assessments WHERE event_id=?
+           ORDER BY assessed_at DESC,assessment_id DESC LIMIT 1""", (ctx.event_id,)
+    ).fetchone()
+    if row is None:
+        raise CliError("event has no current assessment")
+    if int(row["assessment_id"]) != ctx.baseline_assessment_id or int(row["probability_percent"]) != ctx.baseline_probability:
+        raise CliError(
+            f"stale baseline: expected assessment_id={ctx.baseline_assessment_id} probability={ctx.baseline_probability}%, "
+            f"current assessment_id={row['assessment_id']} probability={row['probability_percent']}%"
+        )
+
+
+def persist_report(
+    conn: sqlite3.Connection,
+    ctx: RecommendationContext,
+    report: str,
+    *,
+    agent_id: str | None = None,
+    model_used: str | None = None,
+    run_id: int | None = None,
+    source_run_key: str | None = None,
+) -> int:
+    try:
+        parsed = parse_evidence_recommendation(
+            report,
+            expected_event_id=ctx.event_id,
+            expected_evidence_id=ctx.evidence_id,
+            expected_baseline_assessment_id=ctx.baseline_assessment_id,
+            expected_baseline_probability=ctx.baseline_probability,
+        )
+    except EvidenceRecommendationParseError as exc:
+        raise CliError(str(exc)) from exc
+
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ensure_baseline_current(conn, ctx)
+        recommendation_id = conn.execute(
+            """INSERT INTO evidence_assessment_recommendations(
+                event_id_snapshot,evidence_id,baseline_assessment_id,baseline_probability,
+                recommended_probability,probability_delta,recommended_band,recommended_label,
+                recommendation_confidence,change_from_baseline,net_evidence_direction,
+                net_evidence_impact,baseline_incorporation,category_transition,
+                recommendation_rationale,delta_justification,methodology_version,parser_version,
+                agent_id,model_used,run_id,source_run_key,status
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'ready')""",
+            (
+                ctx.event_id,ctx.evidence_id,ctx.baseline_assessment_id,ctx.baseline_probability,
+                parsed.recommended_probability,parsed.probability_delta,parsed.recommended_band,
+                parsed.recommended_label,parsed.recommendation_confidence,parsed.change_from_baseline,
+                parsed.net_evidence_direction,parsed.net_evidence_impact,parsed.baseline_incorporation,
+                int(parsed.category_transition),parsed.recommendation_rationale,parsed.delta_justification,
+                METHODOLOGY_VERSION,PARSER_VERSION,agent_id,model_used,run_id,source_run_key,
+            ),
+        ).lastrowid
+        conn.commit()
+        return int(recommendation_id)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def main(argv: list[str] | None = None) -> int:
+    p=argparse.ArgumentParser(description="Prepare/persist one-official-evidence PROROK recommendation")
+    p.add_argument("event_id"); p.add_argument("evidence_id",type=int); p.add_argument("--db")
+    p.add_argument("--report-file",help="Strict JSON agent report to validate and persist")
+    p.add_argument("--agent-id"); p.add_argument("--model-used"); p.add_argument("--run-id",type=int); p.add_argument("--source-run-key")
+    a=p.parse_args(argv)
+    try:
+        conn=connect(resolve_db(a.db))
+        try:
+            require_schema_v13(conn)
+            ctx=load_context(conn,a.event_id,a.evidence_id)
+            if not a.report_file:
+                print(build_prompt(ctx))
+                return 0
+            report=Path(a.report_file).read_text(encoding="utf-8")
+            rid=persist_report(conn,ctx,report,agent_id=a.agent_id,model_used=a.model_used,run_id=a.run_id,source_run_key=a.source_run_key)
+            print("OK: evidence recommendation persisted")
+            print(f"evidence_assessment_recommendation_id: {rid}")
+            print(f"event_id: {ctx.event_id}")
+            print(f"evidence_id: {ctx.evidence_id}")
+            print(f"baseline_assessment_id: {ctx.baseline_assessment_id}")
+            return 0
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"ERROR: {exc}",file=sys.stderr)
+        return 1
+
+
+if __name__=="__main__":
+    raise SystemExit(main())
