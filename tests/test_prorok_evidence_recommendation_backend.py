@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"prorok"))
-from prorok_evidence_recommendation_cli import CliError, extract_agent_report, load_context, persist_report, run_openclaw_agent
+from prorok_evidence_recommendation_cli import CliError, build_prompt, extract_agent_report, load_context, persist_report, run_openclaw_agent
 
 DDL=(ROOT/"prorok"/"migrations"/"013_evidence_assessment_recommendations.py").read_text(encoding="utf-8")
 ns={}; exec(compile(DDL,"migration13","exec"),ns)
