@@ -12,6 +12,7 @@ RECOMMENDATIONS_DDL=ns["RECOMMENDATIONS_DDL"]
 
 def make_db(path: Path):
     c=sqlite3.connect(path)
+    c.row_factory=sqlite3.Row
     c.executescript("""CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT);
     INSERT INTO meta(key,value) VALUES('schema_version','13');
     CREATE TABLE events(event_id TEXT PRIMARY KEY,title TEXT,question TEXT,forecast_horizon TEXT,decision_criteria TEXT);
