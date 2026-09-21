@@ -95,6 +95,18 @@ def test_openclaw_agent_success_returns_strict_report():
     assert model == "test-model"
 
 
+def test_openclaw_2026_5_22_payload_envelope_is_supported():
+    envelope = {
+        "result": {
+            "payloads": [{"text": report()}],
+            "meta": {"agentMeta": {"model": "gpt-5.4-mini"}},
+        }
+    }
+    payload, model = extract_agent_report(json.dumps(envelope))
+    assert json.loads(payload)["recommended_probability"] == 20
+    assert model == "gpt-5.4-mini"
+
+
 def test_openclaw_agent_failure_does_not_persist(tmp_path):
     c=make_db(tmp_path/"p.sqlite3")
     def runner(cmd, **kwargs):
