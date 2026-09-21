@@ -43,7 +43,7 @@ def test_recommendation_persists_without_changing_official_assessment(tmp_path):
     rid=persist_report(c,ctx,report(),agent_id="prorok-refresh",model_used="test-model")
     after=c.execute("SELECT COUNT(*),MAX(probability_percent) FROM assessments").fetchone()
     row=c.execute("SELECT * FROM evidence_assessment_recommendations WHERE evidence_assessment_recommendation_id=?",(rid,)).fetchone()
-    assert before==after==(1,15)
+    assert tuple(before)==tuple(after)==(1,15)
     assert row["recommended_probability"]==20
     assert row["baseline_assessment_id"]==12
     assert row["methodology_version"]=="refresh-calibration-v1"
