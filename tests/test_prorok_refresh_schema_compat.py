@@ -81,7 +81,7 @@ def test_refresh_schema_rejects_v2(tmp_path: Path) -> None:
         try:
             module.require_refresh_schema(conn)
         except RuntimeError as exc:
-            assert "schema v3 or v4 required" in str(exc)
+            assert "schema v3+ required" in str(exc)
         else:
             raise AssertionError("schema v2 should be rejected")
     finally:
