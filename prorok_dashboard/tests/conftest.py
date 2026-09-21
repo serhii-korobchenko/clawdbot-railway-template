@@ -203,6 +203,15 @@ class FakeApiClient:
                 "summary": "Evidence summary",
                 "relevance": 80,
                 "credibility": 90,
+                "assessment": {
+                    "status": "unknown",
+                    "provenance_type": None,
+                    "baseline_probability": None,
+                    "selected_probability": None,
+                    "refresh_id": None,
+                    "assessment_id": None,
+                    "decided_at": None,
+                },
                 "source": {
                     "source_id": 1,
                     "title": "Example",
