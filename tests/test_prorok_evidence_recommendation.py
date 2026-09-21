@@ -79,3 +79,24 @@ def test_v13_schema_keeps_legacy_decisions_nullable(tmp_path):
     assert row[0] is None
     assert not m.validate(c)
     c.close()
+
+
+def test_v13_ddl_statements_rollback_atomically(tmp_path):
+    m=load_migration(); db=tmp_path/"atomic.sqlite3"; c=sqlite3.connect(db)
+    c.executescript("""CREATE TABLE runs(run_id INTEGER PRIMARY KEY);
+    CREATE TABLE assessments(assessment_id INTEGER PRIMARY KEY);
+    CREATE TABLE evidence_items(evidence_id INTEGER PRIMARY KEY);""")
+    c.commit()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        for statement in m.RECOMMENDATIONS_DDL.split(";"):
+            if statement.strip():
+                c.execute(statement)
+        raise RuntimeError("force rollback")
+    except RuntimeError:
+        c.rollback()
+    table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_assessment_recommendations'").fetchone()
+    indexes=c.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_evidence_assessment_recommendations_%'").fetchall()
+    assert table is None
+    assert indexes == []
+    c.close()
