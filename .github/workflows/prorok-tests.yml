@@ -1,0 +1,53 @@
+name: PROROK tests
+
+on:
+  push:
+    branches:
+      - feature/prorok-candidate-quarantine-v3
+    paths:
+      - "prorok/**"
+      - "prorok_telegram/**"
+      - "tests/test_prorok_*.py"
+      - ".github/workflows/prorok-tests.yml"
+  pull_request:
+    paths:
+      - "prorok/**"
+      - "prorok_telegram/**"
+      - "tests/test_prorok_*.py"
+      - ".github/workflows/prorok-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prorok-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: PROROK regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Run selected-evidence and regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_prorok_evidence_recommendation.py \
+            tests/test_prorok_refresh_parser.py \
+            tests/test_prorok_refresh_collector.py \
+            tests/test_prorok_refresh_schema_compat.py \
+            tests/test_prorok_telegram_status_ui.py
