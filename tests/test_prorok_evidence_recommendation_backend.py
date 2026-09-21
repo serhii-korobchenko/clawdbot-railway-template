@@ -1,10 +1,10 @@
 from __future__ import annotations
-import json, sqlite3, sys
+import json, sqlite3, subprocess, sys
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"prorok"))
-from prorok_evidence_recommendation_cli import CliError, load_context, persist_report
+from prorok_evidence_recommendation_cli import CliError, extract_agent_report, load_context, persist_report, run_openclaw_agent
 
 DDL=(ROOT/"prorok"/"migrations"/"013_evidence_assessment_recommendations.py").read_text(encoding="utf-8")
 ns={}; exec(compile(DDL,"migration13","exec"),ns)
@@ -79,3 +79,60 @@ def test_invalid_agent_report_is_not_persisted(tmp_path):
     else: raise AssertionError("invalid report must fail")
     assert c.execute("SELECT COUNT(*) FROM evidence_assessment_recommendations").fetchone()[0]==0
     c.close()
+
+
+def agent_envelope(payload: str, model: str = "test-model"):
+    return json.dumps({"response": payload, "model": model}, ensure_ascii=False)
+
+
+def test_openclaw_agent_success_returns_strict_report():
+    def runner(cmd, **kwargs):
+        assert cmd[:3] == ["openclaw", "agent", "--agent"]
+        assert "--message" in cmd and "--json" in cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout=agent_envelope(report()), stderr="")
+    payload, model = run_openclaw_agent("prompt", runner=runner)
+    assert json.loads(payload)["recommended_probability"] == 20
+    assert model == "test-model"
+
+
+def test_openclaw_agent_failure_does_not_persist(tmp_path):
+    c=make_db(tmp_path/"p.sqlite3")
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 2, stdout="", stderr="gateway unavailable")
+    try:
+        run_openclaw_agent("prompt", runner=runner)
+    except CliError as exc:
+        assert "exit code 2" in str(exc)
+    else:
+        raise AssertionError("agent failure must fail")
+    assert c.execute("SELECT COUNT(*) FROM evidence_assessment_recommendations").fetchone()[0] == 0
+    c.close()
+
+
+def test_openclaw_agent_timeout_is_explicit():
+    def runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+    try:
+        run_openclaw_agent("prompt", timeout_seconds=7, runner=runner)
+    except CliError as exc:
+        assert "timed out after 7s" in str(exc)
+    else:
+        raise AssertionError("timeout must fail")
+
+
+def test_invalid_openclaw_json_envelope_is_rejected():
+    try:
+        extract_agent_report("not-json")
+    except CliError as exc:
+        assert "invalid JSON envelope" in str(exc)
+    else:
+        raise AssertionError("invalid OpenClaw envelope must fail")
+
+
+def test_openclaw_envelope_without_strict_report_is_rejected():
+    try:
+        extract_agent_report(json.dumps({"response":"plain prose"}))
+    except CliError as exc:
+        assert "does not contain" in str(exc)
+    else:
+        raise AssertionError("plain prose must fail")
