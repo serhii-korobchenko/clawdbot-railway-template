@@ -48,6 +48,7 @@ jobs:
           python -m pytest -q \
             tests/test_prorok_evidence_recommendation.py \
             tests/test_prorok_evidence_recommendation_backend.py \
+          tests/test_prorok_evidence_assessment_recommendation_link.py \
             tests/test_prorok_refresh_parser.py \
             tests/test_prorok_refresh_collector.py \
             tests/test_prorok_refresh_schema_compat.py \
