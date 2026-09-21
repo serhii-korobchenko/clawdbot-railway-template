@@ -165,6 +165,8 @@ CALIBRATION RULES
 - probability_delta = recommended_probability - baseline_probability.
 - category_transition is true only when the qualitative band changes.
 - A no-change recommendation is valid.
+- Always write all user-facing explanatory text in Ukrainian, regardless of the language of the evidence.
+- In particular, recommendation_rationale and delta_justification MUST be in Ukrainian.
 
 Return ONLY one JSON object with exactly these keys:
 event_id, evidence_id, baseline_assessment_id, baseline_probability,
