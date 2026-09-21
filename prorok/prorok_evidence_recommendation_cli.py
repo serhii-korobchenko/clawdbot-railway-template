@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import json
 import sqlite3
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +32,8 @@ except ImportError:
 
 DEFAULT_DB = "/data/workspace/prorok/prorok.sqlite3"
 MIN_SCHEMA_VERSION = 13
+DEFAULT_AGENT_ID = "prorok-refresh"
+DEFAULT_AGENT_TIMEOUT_SECONDS = 180
 
 
 class CliError(RuntimeError):
@@ -182,6 +186,89 @@ category_transition: true|false
 """
 
 
+
+def extract_agent_report(stdout: str) -> tuple[str, str | None]:
+    """Extract the strict recommendation JSON from OpenClaw --json output."""
+    try:
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise CliError(f"OpenClaw agent returned invalid JSON envelope: {exc}") from exc
+
+    candidates: list[str] = []
+    model_used: str | None = None
+    if isinstance(envelope, dict):
+        for key in ("model", "model_used"):
+            value = envelope.get(key)
+            if isinstance(value, str) and value.strip():
+                model_used = value.strip()
+                break
+
+        for key in ("response", "output", "text", "message", "content"):
+            value = envelope.get(key)
+            if isinstance(value, str):
+                candidates.append(value)
+            elif isinstance(value, dict):
+                for nested in ("text", "content", "response", "output"):
+                    nested_value = value.get(nested)
+                    if isinstance(nested_value, str):
+                        candidates.append(nested_value)
+
+        result = envelope.get("result")
+        if isinstance(result, dict):
+            for key in ("response", "output", "text", "message", "content"):
+                value = result.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+                elif isinstance(value, dict):
+                    nested_value = value.get("text") or value.get("content")
+                    if isinstance(nested_value, str):
+                        candidates.append(nested_value)
+
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return candidate, model_used
+
+    raise CliError("OpenClaw agent JSON envelope does not contain a strict JSON recommendation report")
+
+
+def run_openclaw_agent(
+    prompt: str,
+    *,
+    agent_id: str = DEFAULT_AGENT_ID,
+    timeout_seconds: int = DEFAULT_AGENT_TIMEOUT_SECONDS,
+    runner=subprocess.run,
+) -> tuple[str, str | None]:
+    """Run one isolated PROROK agent turn and return the embedded strict report."""
+    cmd = [
+        "openclaw",
+        "agent",
+        "--agent",
+        agent_id,
+        "--message",
+        prompt,
+        "--json",
+    ]
+    try:
+        completed = runner(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CliError(f"OpenClaw agent timed out after {timeout_seconds}s") from exc
+    except OSError as exc:
+        raise CliError(f"failed to start OpenClaw agent: {exc}") from exc
+
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        detail = stderr[-800:] if stderr else "no stderr"
+        raise CliError(f"OpenClaw agent failed with exit code {completed.returncode}: {detail}")
+
+    return extract_agent_report(completed.stdout)
+
 def ensure_baseline_current(conn: sqlite3.Connection, ctx: RecommendationContext) -> None:
     row = conn.execute(
         """SELECT assessment_id,probability_percent FROM assessments WHERE event_id=?
@@ -248,19 +335,33 @@ def persist_report(
 def main(argv: list[str] | None = None) -> int:
     p=argparse.ArgumentParser(description="Prepare/persist one-official-evidence PROROK recommendation")
     p.add_argument("event_id"); p.add_argument("evidence_id",type=int); p.add_argument("--db")
-    p.add_argument("--report-file",help="Strict JSON agent report to validate and persist")
-    p.add_argument("--agent-id"); p.add_argument("--model-used"); p.add_argument("--run-id",type=int); p.add_argument("--source-run-key")
+    p.add_argument("--report-file",help="Strict JSON agent report to validate and persist instead of invoking OpenClaw")
+    p.add_argument("--print-prompt",action="store_true",help="Print prompt only; do not invoke agent or persist")
+    p.add_argument("--agent-id",default=DEFAULT_AGENT_ID)
+    p.add_argument("--agent-timeout-seconds",type=int,default=DEFAULT_AGENT_TIMEOUT_SECONDS)
+    p.add_argument("--model-used"); p.add_argument("--run-id",type=int); p.add_argument("--source-run-key")
     a=p.parse_args(argv)
     try:
         conn=connect(resolve_db(a.db))
         try:
             require_schema_v13(conn)
             ctx=load_context(conn,a.event_id,a.evidence_id)
-            if not a.report_file:
-                print(build_prompt(ctx))
+            prompt=build_prompt(ctx)
+            if a.print_prompt:
+                print(prompt)
                 return 0
-            report=Path(a.report_file).read_text(encoding="utf-8")
-            rid=persist_report(conn,ctx,report,agent_id=a.agent_id,model_used=a.model_used,run_id=a.run_id,source_run_key=a.source_run_key)
+            model_used=a.model_used
+            if a.report_file:
+                report=Path(a.report_file).read_text(encoding="utf-8")
+            else:
+                report, detected_model=run_openclaw_agent(
+                    prompt,
+                    agent_id=a.agent_id,
+                    timeout_seconds=a.agent_timeout_seconds,
+                )
+                if not model_used:
+                    model_used=detected_model
+            rid=persist_report(conn,ctx,report,agent_id=a.agent_id,model_used=model_used,run_id=a.run_id,source_run_key=a.source_run_key)
             print("OK: evidence recommendation persisted")
             print(f"evidence_assessment_recommendation_id: {rid}")
             print(f"event_id: {ctx.event_id}")
