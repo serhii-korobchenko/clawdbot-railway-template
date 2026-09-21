@@ -360,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("event_id"); p.add_argument("evidence_id",type=int); p.add_argument("--db")
     p.add_argument("--report-file",help="Strict JSON agent report to validate and persist instead of invoking OpenClaw")
     p.add_argument("--print-prompt",action="store_true",help="Print prompt only; do not invoke agent or persist")
+    p.add_argument("--dry-run-json",action="store_true",help="Invoke agent and print its raw strict JSON report; do not validate or persist")
     p.add_argument("--agent-id",default=DEFAULT_AGENT_ID)
     p.add_argument("--agent-timeout-seconds",type=int,default=DEFAULT_AGENT_TIMEOUT_SECONDS)
     p.add_argument("--model-used"); p.add_argument("--run-id",type=int); p.add_argument("--source-run-key")
@@ -385,6 +386,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if not model_used:
                     model_used=detected_model
+            if a.dry_run_json:
+                print(report)
+                return 0
             rid=persist_report(conn,ctx,report,agent_id=a.agent_id,model_used=model_used,run_id=a.run_id,source_run_key=a.source_run_key)
             if a.output_json:
                 row=conn.execute("SELECT * FROM evidence_assessment_recommendations WHERE evidence_assessment_recommendation_id=?",(rid,)).fetchone()
