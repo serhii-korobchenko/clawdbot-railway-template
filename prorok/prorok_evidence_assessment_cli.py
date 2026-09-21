@@ -23,6 +23,7 @@ def main():
     p.add_argument("--db"); p.add_argument("event_id"); p.add_argument("evidence_id",type=int)
     p.add_argument("--baseline-assessment-id",type=int,required=True); p.add_argument("--probability",type=int,required=True)
     p.add_argument("--source",default="telegram",choices=("telegram","manual_cli","system")); p.add_argument("--actor")
+    p.add_argument("--recommendation-id",type=int,help="Optional selected-evidence recommendation provenance id")
     a=p.parse_args()
     if a.probability not in GRID: print("ERROR: --probability must use the canonical 5pp grid (0,5,...,100)",file=sys.stderr); return 1
     try: band,label=band_for(a.probability)
@@ -39,7 +40,24 @@ def main():
         if cur is None: raise RuntimeError("event has no current assessment")
         if int(cur["assessment_id"])!=a.baseline_assessment_id:
             raise RuntimeError(f"stale baseline: expected assessment_id={a.baseline_assessment_id}, current={cur['assessment_id']}")
-        baseline=int(cur["probability_percent"]); ts=now()
+        baseline=int(cur["probability_percent"])
+        recommendation_id=None
+        if a.recommendation_id is not None:
+            rec=c.execute("""SELECT evidence_assessment_recommendation_id,event_id_snapshot,evidence_id,
+              baseline_assessment_id,baseline_probability,status
+              FROM evidence_assessment_recommendations
+              WHERE evidence_assessment_recommendation_id=?""",(a.recommendation_id,)).fetchone()
+            if rec is None: raise RuntimeError(f"recommendation not found: {a.recommendation_id}")
+            if str(rec["event_id_snapshot"])!=a.event_id or int(rec["evidence_id"])!=a.evidence_id:
+                raise RuntimeError("recommendation does not belong to the requested event/evidence")
+            if int(rec["baseline_assessment_id"])!=a.baseline_assessment_id or int(rec["baseline_probability"])!=baseline:
+                raise RuntimeError("recommendation baseline does not match the current requested baseline")
+            if str(rec["status"])!="ready":
+                raise RuntimeError(f"recommendation is not actionable: status={rec['status']}")
+            used=c.execute("SELECT evidence_assessment_decision_id FROM evidence_assessment_decisions WHERE recommendation_id=?",(a.recommendation_id,)).fetchone()
+            if used is not None: raise RuntimeError(f"recommendation already has a decision: {used['evidence_assessment_decision_id']}")
+            recommendation_id=a.recommendation_id
+        ts=now()
         run=c.execute("INSERT INTO runs(run_type,status,notes) VALUES('manual_cli','running',?)",
           (f"Evidence-based assessment evidence_id={a.evidence_id} source={a.source}",)).lastrowid
         rationale=f"User assessment via {a.source} based on official evidence #{a.evidence_id}: {ev['summary']}"
@@ -47,8 +65,8 @@ def main():
           probability_label,confidence,delta_from_previous,rationale) VALUES(?,?,?,?,?,?,?,?,?)""",
           (a.event_id,run,ts,a.probability,band,label,cur["confidence"] or "medium",a.probability-baseline,rationale)).lastrowid
         dec=c.execute("""INSERT INTO evidence_assessment_decisions(event_id_snapshot,evidence_id,baseline_assessment_id,
-          baseline_probability,selected_probability,assessment_id,run_id,decision_source,actor,decided_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?)""",(a.event_id,a.evidence_id,a.baseline_assessment_id,baseline,a.probability,ass,run,a.source,a.actor,ts)).lastrowid
+          baseline_probability,selected_probability,assessment_id,run_id,decision_source,actor,decided_at,recommendation_id)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(a.event_id,a.evidence_id,a.baseline_assessment_id,baseline,a.probability,ass,run,a.source,a.actor,ts,recommendation_id)).lastrowid
         c.execute("UPDATE runs SET finished_at=?,status='completed',events_processed=1 WHERE run_id=?",(ts,run)); c.commit()
         print("OK: evidence-based assessment added"); print(f"evidence_assessment_decision_id: {dec}"); print(f"evidence_id: {a.evidence_id}")
         print(f"assessment_id: {ass}"); print(f"baseline_probability: {baseline}%"); print(f"selected_probability: {a.probability}%"); print(f"run_id: {run}")
