@@ -13,6 +13,15 @@ def test_official_evidence_page(logged_in_client):
                     "summary": "Official evidence summary",
                     "relevance": 95,
                     "credibility": 90,
+                    "assessment": {
+                        "status": "unknown",
+                        "provenance_type": None,
+                        "baseline_probability": None,
+                        "selected_probability": None,
+                        "refresh_id": None,
+                        "assessment_id": None,
+                        "decided_at": None,
+                    },
                     "event": {
                         "event_id": "event-1",
                         "title": "Test event",
