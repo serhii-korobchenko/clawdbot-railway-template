@@ -9,7 +9,7 @@ from typing import Any
 
 from prorok_calibration import calibration_math
 
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 METHODOLOGY_VERSION = "refresh-calibration-v1"
 ALLOWED_CONFIDENCE = {"low", "medium", "high"}
 ALLOWED_DIRECTION = {"positive", "negative", "balanced"}
@@ -109,13 +109,16 @@ def parse_evidence_recommendation(
     except ValueError as exc:
         raise EvidenceRecommendationParseError(str(exc)) from exc
 
-    for field in ("recommended_band", "recommended_label", "change_from_baseline"):
-        if data[field] != math[field]:
-            raise EvidenceRecommendationParseError(f"{field} does not match deterministic calibration")
-    if _integer(data["probability_delta"], "probability_delta") != math["probability_delta"]:
-        raise EvidenceRecommendationParseError("probability_delta does not match deterministic calibration")
-    if not isinstance(data["category_transition"], bool) or data["category_transition"] != math["category_transition"]:
-        raise EvidenceRecommendationParseError("category_transition does not match deterministic calibration")
+    # These fields are deterministic derivatives of baseline + recommendation.
+    # LLM values are deliberately ignored and normalized by code so formatting
+    # mistakes cannot invalidate an otherwise coherent recommendation.
+    derived_fields = ("recommended_band", "recommended_label", "change_from_baseline")
+    for field in derived_fields:
+        if not isinstance(data[field], str):
+            raise EvidenceRecommendationParseError(f"{field} must be text")
+    _integer(data["probability_delta"], "probability_delta")
+    if not isinstance(data["category_transition"], bool):
+        raise EvidenceRecommendationParseError("category_transition must be boolean")
 
     confidence = _text(data["recommendation_confidence"], "recommendation_confidence").lower()
     direction = _text(data["net_evidence_direction"], "net_evidence_direction").lower()
