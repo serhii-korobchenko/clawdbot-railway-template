@@ -340,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent-id",default=DEFAULT_AGENT_ID)
     p.add_argument("--agent-timeout-seconds",type=int,default=DEFAULT_AGENT_TIMEOUT_SECONDS)
     p.add_argument("--model-used"); p.add_argument("--run-id",type=int); p.add_argument("--source-run-key")
+    p.add_argument("--output-json",action="store_true",help="Emit the persisted recommendation as one JSON object")
     a=p.parse_args(argv)
     try:
         conn=connect(resolve_db(a.db))
@@ -362,11 +363,15 @@ def main(argv: list[str] | None = None) -> int:
                 if not model_used:
                     model_used=detected_model
             rid=persist_report(conn,ctx,report,agent_id=a.agent_id,model_used=model_used,run_id=a.run_id,source_run_key=a.source_run_key)
-            print("OK: evidence recommendation persisted")
-            print(f"evidence_assessment_recommendation_id: {rid}")
-            print(f"event_id: {ctx.event_id}")
-            print(f"evidence_id: {ctx.evidence_id}")
-            print(f"baseline_assessment_id: {ctx.baseline_assessment_id}")
+            if a.output_json:
+                row=conn.execute("SELECT * FROM evidence_assessment_recommendations WHERE evidence_assessment_recommendation_id=?",(rid,)).fetchone()
+                print(json.dumps(dict(row),ensure_ascii=False,separators=(",",":")))
+            else:
+                print("OK: evidence recommendation persisted")
+                print(f"evidence_assessment_recommendation_id: {rid}")
+                print(f"event_id: {ctx.event_id}")
+                print(f"evidence_id: {ctx.evidence_id}")
+                print(f"baseline_assessment_id: {ctx.baseline_assessment_id}")
             return 0
         finally:
             conn.close()
