@@ -98,7 +98,9 @@ def main():
         if before!= "12":
             raise RuntimeError(f"schema_version expected 12 before migration, got {before!r}")
         c.execute("BEGIN IMMEDIATE")
-        c.executescript(RECOMMENDATIONS_DDL)
+        for statement in RECOMMENDATIONS_DDL.split(";"):
+            if statement.strip():
+                c.execute(statement)
         if "recommendation_id" not in columns(c,"evidence_assessment_decisions"):
             c.execute("ALTER TABLE evidence_assessment_decisions ADD COLUMN recommendation_id INTEGER REFERENCES evidence_assessment_recommendations(evidence_assessment_recommendation_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_evidence_assessment_decisions_recommendation ON evidence_assessment_decisions(recommendation_id)")
