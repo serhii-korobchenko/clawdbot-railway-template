@@ -2,212 +2,40 @@
 {% block title %}Evidence · PROROK{% endblock %}
 {% block content %}
 <section class="page-heading">
-  <div>
-    <p class="eyebrow">Source analysis</p>
-    <h1>Evidence</h1>
-  </div>
+  <div><p class="eyebrow">Source analysis</p><h1>Evidence</h1></div>
   <div class="total-count">{{ data.filtered_total }} / {{ data.total }}</div>
 </section>
-
 <nav class="status-tabs" aria-label="Тип evidence">
   <a class="status-tab {% if tab == 'official' %}is-active{% endif %}" href="/evidence?tab=official">Official</a>
   <a class="status-tab {% if tab == 'candidates' %}is-active{% endif %}" href="/evidence?tab=candidates">Candidates</a>
 </nav>
-
-{% if tab == 'candidates' %}
-<p class="info-note">Candidate evidence — quarantine-дані з dry-run refresh. Статус accepted означає, що candidate пройшов validation; official evidence він стає лише після фінального рішення користувача та promotion.</p>
-{% endif %}
-
+{% if tab == 'candidates' %}<p class="info-note">Candidate evidence — quarantine-дані з dry-run refresh. Статус accepted означає, що candidate пройшов validation; official evidence він стає лише після фінального рішення користувача та promotion.</p>{% endif %}
 <form method="get" action="/evidence" class="evidence-filter-form">
-  <input type="hidden" name="tab" value="{{ tab }}">
-
-  <label>
-    <span>Подія</span>
-    <select name="event_id">
-      <option value="">Усі події</option>
-      {% for event in events %}
-      <option value="{{ event.event_id }}" {% if event_id == event.event_id %}selected{% endif %}>{{ event.title }}</option>
-      {% endfor %}
-    </select>
-  </label>
-
-  <label>
-    <span>Напрям</span>
-    <select name="direction">
-      <option value="">Усі</option>
-      <option value="indicator" {% if direction == 'indicator' %}selected{% endif %}>Indicator</option>
-      <option value="counterindicator" {% if direction == 'counterindicator' %}selected{% endif %}>Counterindicator</option>
-      {% if tab == 'official' %}
-      <option value="neutral" {% if direction == 'neutral' %}selected{% endif %}>Neutral</option>
-      {% endif %}
-    </select>
-  </label>
-
-  <label>
-    <span>Сила</span>
-    <select name="strength">
-      <option value="">Усі</option>
-      <option value="weak" {% if strength == 'weak' %}selected{% endif %}>Weak</option>
-      <option value="medium" {% if strength == 'medium' %}selected{% endif %}>Medium</option>
-      <option value="strong" {% if strength == 'strong' %}selected{% endif %}>Strong</option>
-    </select>
-  </label>
-
-  {% if tab == 'candidates' %}
-  <label>
-    <span>Стан candidate</span>
-    <select name="lifecycle">
-      <option value="pending" {% if lifecycle == 'pending' %}selected{% endif %}>Очікують рішення</option>
-      <option value="processed" {% if lifecycle == 'processed' %}selected{% endif %}>Оброблені</option>
-      <option value="all" {% if lifecycle == 'all' %}selected{% endif %}>Усі</option>
-    </select>
-  </label>
-
-  <label>
-    <span>Validation</span>
-    <select name="validation_state">
-      <option value="">Усі</option>
-      <option value="accepted" {% if validation_state == 'accepted' %}selected{% endif %}>Accepted</option>
-      <option value="legacy_unvalidated" {% if validation_state == 'legacy_unvalidated' %}selected{% endif %}>Legacy unvalidated</option>
-      <option value="rejected_source_policy" {% if validation_state == 'rejected_source_policy' %}selected{% endif %}>Rejected: source policy</option>
-      <option value="rejected_date_conflict" {% if validation_state == 'rejected_date_conflict' %}selected{% endif %}>Rejected: date conflict</option>
-      <option value="rejected_invalid_metadata" {% if validation_state == 'rejected_invalid_metadata' %}selected{% endif %}>Rejected: invalid metadata</option>
-    </select>
-  </label>
-  {% endif %}
-
-  <label>
-    <span>Джерело</span>
-    <input type="search" name="source" value="{{ source }}" placeholder="domain, title або URL">
-  </label>
-
-  <label>
-    <span>Сортування</span>
-    <select name="sort">
-      <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Нові спочатку</option>
-      <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Старі спочатку</option>
-    </select>
-  </label>
-
-  <label class="evidence-search-field">
-    <span>Пошук</span>
-    <input type="search" name="q" value="{{ q }}" placeholder="summary, подія, джерело">
-  </label>
-
-  <div class="filter-actions">
-    <button type="submit" class="primary-button">Застосувати</button>
-    <a href="/evidence?tab={{ tab }}">Скинути</a>
-  </div>
-</form>
-
-{% if data["items"] %}
-<div class="evidence-list">
-  {% for item in data["items"] %}
-  {% if tab == 'official' %}
-  <article class="evidence-card evidence-{{ item.direction }}">
-    <div class="evidence-card-head">
-      <div>
-        <div class="inline-meta">
-          <span class="evidence-direction">{{ item.direction }}</span>
-          <span>{{ item.strength or 'strength n/a' }}</span>
-          <span>{{ item.created_at|fmt_datetime }}</span>
-        </div>
-        <h2><a href="/events/{{ item.event.event_id }}">{{ item.event.title }}</a></h2>
-      </div>
-      <span class="status-badge status-{{ item.event.status }}">{{ item.event.status }}</span>
-    </div>
-
-    <p class="evidence-summary">{{ item.summary }}</p>
-
-    <div class="quality-metrics">
-      {% if item.assessment.status == 'assessed_changed' %}
-      <span>Оцінено · прогноз змінено: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>
-      {% elif item.assessment.status == 'assessed_unchanged' %}
-      <span>Оцінено · без зміни: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>
-      {% else %}
-      <span>Статус оцінки невідомий</span>
-      {% endif %}
-      {% if item.assessment.provenance_type == 'evidence_manual' %}<span>Ручна оцінка Evidence #{{ item.evidence_id }}</span>{% endif %}
-      {% if item.assessment.refresh_id is not none %}<span>Refresh #{{ item.assessment.refresh_id }}</span>{% endif %}
-      {% if item.assessment.assessment_id is not none %}<span>Assessment #{{ item.assessment.assessment_id }}</span>{% endif %}
-      {% if item.assessment.decided_at %}<span>{{ item.assessment.decided_at|fmt_datetime }}</span>{% endif %}
-    </div>
-
-    <div class="quality-metrics">
-      <span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span>
-      <span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span>
-      <span>Evidence #{{ item.evidence_id }}</span>
-      {% if item.run_id is not none %}<span>Run #{{ item.run_id }}</span>{% endif %}
-    </div>
-
-    <div class="source-box">
-      <div>
-        <strong>{{ item.source.title or item.source.domain or 'Source' }}</strong>
-        <span>{{ item.source.domain or item.source.source_type or '—' }}</span>
-        {% if item.source.published_at %}<span class="source-date">{{ item.source.published_at|fmt_datetime }}</span>{% endif %}
-      </div>
-      {% set source_url = item.source.url|safe_external_url %}
-      {% if source_url %}<a class="primary-link" href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>{% endif %}
-    </div>
-  </article>
-  {% else %}
-  <article class="evidence-card evidence-{{ item.direction }}">
-    <div class="evidence-card-head">
-      <div>
-        <div class="inline-meta">
-          <span class="evidence-direction">{{ item.direction }}</span>
-          <span>{{ item.strength or 'strength n/a' }}</span>
-          <span>Refresh #{{ item.refresh_id }}</span>
-          <span>Candidate #{{ item.ordinal }}</span>
-        </div>
-        <h2>
-          {% if item.event_id %}<a href="/events/{{ item.event_id }}">{{ item.event_title }}</a>{% else %}{{ item.event_title }}{% endif %}
-        </h2>
-      </div>
-      <span class="validation-badge validation-{{ item.validation_state }}">{{ item.validation_state }}</span>
-    </div>
-
-    {% if item.title %}<h3 class="candidate-title">{{ item.title }}</h3>{% endif %}
-    {% if item.summary %}<p class="evidence-summary">{{ item.summary }}</p>{% endif %}
-    {% if item.why_it_matters %}<p><strong>Why it matters:</strong> {{ item.why_it_matters }}</p>{% endif %}
-
-    <div class="quality-metrics">
-      <span>Validation: {{ item.validation_state }}</span>
-      {% if item.decision_type %}
-      <span>Decision: {{ item.decision_type }} · {{ item.selected_probability }}%</span>
-      {% elif item.validation_state == 'accepted' %}
-      <span>Decision: awaiting user decision</span>
-      {% else %}
-      <span>Decision: not applicable</span>
-      {% endif %}
-      {% if item.evidence_id is not none %}
-      <span>Official evidence: Evidence #{{ item.evidence_id }} · {{ item.promotion_action or 'promoted' }}</span>
-      {% else %}
-      <span>Official evidence: not promoted</span>
-      {% endif %}
-      <span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span>
-      <span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span>
-      <span>Freshness: {{ item.freshness or '—' }}</span>
-      {% if item.duplicate_risk %}<span>Duplicate risk: {{ item.duplicate_risk }}</span>{% endif %}
-    </div>
-
-    {% if item.rejection_reason %}
-    <p class="candidate-rejection"><strong>Rejected:</strong> {{ item.rejection_reason }}</p>
-    {% endif %}
-
-    <div class="source-box">
-      <div>
-        <strong>{{ item.source or item.title or 'Candidate source' }}</strong>
-        {% if item.published_at %}<span class="source-date">{{ item.published_at|fmt_datetime }}</span>{% endif %}
-      </div>
-      {% set candidate_url = item.url|safe_external_url %}
-      {% if candidate_url %}<a class="primary-link" href="{{ candidate_url }}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>{% endif %}
-    </div>
-  </article>
-  {% endif %}
-  {% endfor %}
-</div>
+<input type="hidden" name="tab" value="{{ tab }}">
+<label><span>Подія</span><select name="event_id"><option value="">Усі події</option>{% for event in events %}<option value="{{ event.event_id }}" {% if event_id == event.event_id %}selected{% endif %}>{{ event.title }}</option>{% endfor %}</select></label>
+<label><span>Напрям</span><select name="direction"><option value="">Усі</option><option value="indicator" {% if direction == 'indicator' %}selected{% endif %}>Indicator</option><option value="counterindicator" {% if direction == 'counterindicator' %}selected{% endif %}>Counterindicator</option>{% if tab == 'official' %}<option value="neutral" {% if direction == 'neutral' %}selected{% endif %}>Neutral</option>{% endif %}</select></label>
+<label><span>Сила</span><select name="strength"><option value="">Усі</option><option value="weak" {% if strength == 'weak' %}selected{% endif %}>Weak</option><option value="medium" {% if strength == 'medium' %}selected{% endif %}>Medium</option><option value="strong" {% if strength == 'strong' %}selected{% endif %}>Strong</option></select></label>
+{% if tab == 'official' %}
+<label><span>PROROK_APP</span><select name="prorok_app"><option value="">Усі</option><option value="marked" {% if prorok_app == 'marked' %}selected{% endif %}>Внесено</option><option value="unmarked" {% if prorok_app == 'unmarked' %}selected{% endif %}>Не внесено</option></select></label>
 {% else %}
-<div class="empty-state">За вибраними фільтрами evidence не знайдено.</div>
+<label><span>Стан candidate</span><select name="lifecycle"><option value="pending" {% if lifecycle == 'pending' %}selected{% endif %}>Очікують рішення</option><option value="processed" {% if lifecycle == 'processed' %}selected{% endif %}>Оброблені</option><option value="all" {% if lifecycle == 'all' %}selected{% endif %}>Усі</option></select></label>
+<label><span>Validation</span><select name="validation_state"><option value="">Усі</option><option value="accepted" {% if validation_state == 'accepted' %}selected{% endif %}>Accepted</option><option value="legacy_unvalidated" {% if validation_state == 'legacy_unvalidated' %}selected{% endif %}>Legacy unvalidated</option><option value="rejected_source_policy" {% if validation_state == 'rejected_source_policy' %}selected{% endif %}>Rejected: source policy</option><option value="rejected_date_conflict" {% if validation_state == 'rejected_date_conflict' %}selected{% endif %}>Rejected: date conflict</option><option value="rejected_invalid_metadata" {% if validation_state == 'rejected_invalid_metadata' %}selected{% endif %}>Rejected: invalid metadata</option></select></label>
 {% endif %}
+<label><span>Джерело</span><input type="search" name="source" value="{{ source }}" placeholder="domain, title або URL"></label>
+<label><span>Сортування</span><select name="sort"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>Нові спочатку</option><option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Старі спочатку</option></select></label>
+<label class="evidence-search-field"><span>Пошук</span><input type="search" name="q" value="{{ q }}" placeholder="summary, подія, джерело"></label>
+<div class="filter-actions"><button type="submit" class="primary-button">Застосувати</button><a href="/evidence?tab={{ tab }}">Скинути</a></div>
+</form>
+{% if data["items"] %}<div class="evidence-list">{% for item in data["items"] %}{% if tab == 'official' %}
+<article class="evidence-card evidence-{{ item.direction }}">
+<div class="evidence-card-head"><div><div class="inline-meta"><span class="evidence-direction">{{ item.direction }}</span><span>{{ item.strength or 'strength n/a' }}</span><span>{{ item.created_at|fmt_datetime }}</span></div><h2><a href="/events/{{ item.event.event_id }}">{{ item.event.title }}</a></h2></div><span class="status-badge status-{{ item.event.status }}">{{ item.event.status }}</span></div>
+<p class="evidence-summary">{{ item.summary }}</p>
+<div class="quality-metrics"><span><strong>PROROK_APP:</strong> {% if item.prorok_app.state == 'marked' %}✅ внесено{% else %}⬜ не внесено{% endif %}</span>{% if item.prorok_app.changed_at %}<span>Оновлено {{ item.prorok_app.changed_at|fmt_datetime }}</span>{% endif %}</div>
+<div class="quality-metrics">{% if item.assessment.status == 'assessed_changed' %}<span>Оцінено · прогноз змінено: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>{% elif item.assessment.status == 'assessed_unchanged' %}<span>Оцінено · без зміни: {{ item.assessment.baseline_probability }}% → {{ item.assessment.selected_probability }}%</span>{% else %}<span>Статус оцінки невідомий</span>{% endif %}{% if item.assessment.provenance_type == 'evidence_manual' %}<span>Ручна оцінка Evidence #{{ item.evidence_id }}</span>{% endif %}{% if item.assessment.refresh_id is not none %}<span>Refresh #{{ item.assessment.refresh_id }}</span>{% endif %}{% if item.assessment.assessment_id is not none %}<span>Assessment #{{ item.assessment.assessment_id }}</span>{% endif %}{% if item.assessment.decided_at %}<span>{{ item.assessment.decided_at|fmt_datetime }}</span>{% endif %}</div>
+<div class="quality-metrics"><span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span><span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span><span>Evidence #{{ item.evidence_id }}</span>{% if item.run_id is not none %}<span>Run #{{ item.run_id }}</span>{% endif %}</div>
+<div class="source-box"><div><strong>{{ item.source.title or item.source.domain or 'Source' }}</strong><span>{{ item.source.domain or item.source.source_type or '—' }}</span>{% if item.source.published_at %}<span class="source-date">{{ item.source.published_at|fmt_datetime }}</span>{% endif %}</div>{% set source_url = item.source.url|safe_external_url %}{% if source_url %}<a class="primary-link" href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>{% endif %}</div>
+</article>
+{% else %}
+<article class="evidence-card evidence-{{ item.direction }}"><div class="evidence-card-head"><div><div class="inline-meta"><span class="evidence-direction">{{ item.direction }}</span><span>{{ item.strength or 'strength n/a' }}</span><span>Refresh #{{ item.refresh_id }}</span><span>Candidate #{{ item.ordinal }}</span></div><h2>{% if item.event_id %}<a href="/events/{{ item.event_id }}">{{ item.event_title }}</a>{% else %}{{ item.event_title }}{% endif %}</h2></div><span class="validation-badge validation-{{ item.validation_state }}">{{ item.validation_state }}</span></div>{% if item.title %}<h3 class="candidate-title">{{ item.title }}</h3>{% endif %}{% if item.summary %}<p class="evidence-summary">{{ item.summary }}</p>{% endif %}{% if item.why_it_matters %}<p><strong>Why it matters:</strong> {{ item.why_it_matters }}</p>{% endif %}<div class="quality-metrics"><span>Validation: {{ item.validation_state }}</span>{% if item.decision_type %}<span>Decision: {{ item.decision_type }} · {{ item.selected_probability }}%</span>{% elif item.validation_state == 'accepted' %}<span>Decision: awaiting user decision</span>{% else %}<span>Decision: not applicable</span>{% endif %}{% if item.evidence_id is not none %}<span>Official evidence: Evidence #{{ item.evidence_id }} · {{ item.promotion_action or 'promoted' }}</span>{% else %}<span>Official evidence: not promoted</span>{% endif %}<span>Relevance: {{ item.relevance if item.relevance is not none else '—' }}</span><span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span><span>Freshness: {{ item.freshness or '—' }}</span>{% if item.duplicate_risk %}<span>Duplicate risk: {{ item.duplicate_risk }}</span>{% endif %}</div>{% if item.rejection_reason %}<p class="candidate-rejection"><strong>Rejected:</strong> {{ item.rejection_reason }}</p>{% endif %}<div class="source-box"><div><strong>{{ item.source or item.title or 'Candidate source' }}</strong>{% if item.published_at %}<span class="source-date">{{ item.published_at|fmt_datetime }}</span>{% endif %}</div>{% set candidate_url = item.url|safe_external_url %}{% if candidate_url %}<a class="primary-link" href="{{ candidate_url }}" target="_blank" rel="noopener noreferrer">Відкрити джерело</a>{% endif %}</div></article>
+{% endif %}{% endfor %}</div>{% else %}<div class="empty-state">За вибраними фільтрами evidence не знайдено.</div>{% endif %}
 {% endblock %}
