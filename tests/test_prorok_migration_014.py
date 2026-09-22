@@ -31,7 +31,8 @@ def test_v14_preserves_rows_promotion_links_and_allows_neutral(tmp_path):
   run_apply_like_main(c,m)
   row=c.execute("SELECT candidate_id,direction,url,validation_state FROM refresh_candidate_evidence").fetchone()
   assert dict(row)=={"candidate_id":7,"direction":"indicator","url":"https://example.com/a","validation_state":"accepted"}
-  assert c.execute("SELECT candidate_id,evidence_id FROM refresh_candidate_promotions").fetchone()==(7,99)
+  promotion=c.execute("SELECT candidate_id,evidence_id FROM refresh_candidate_promotions").fetchone()
+  assert tuple(promotion)==(7,99)
   assert m.version(c)=="14"
   c.execute("INSERT INTO refresh_candidate_evidence(refresh_event_result_id,ordinal,direction,url,validation_state) VALUES(10,2,'neutral','https://example.com/b','accepted')"); c.commit()
   assert c.execute("SELECT direction FROM refresh_candidate_evidence WHERE ordinal=2").fetchone()[0]=="neutral"
