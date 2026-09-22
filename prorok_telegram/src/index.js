@@ -2,6 +2,11 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import {
+  candidatePage,
+  candidateRoute,
+  parseCandidateRoute,
+} from "./candidate_ui.js";
 
 const API_BASE = process.env.PROROK_API_BASE_URL || "http://127.0.0.1:18880";
 const API_TOKEN = process.env.PROROK_API_TOKEN || "";
@@ -1544,70 +1549,72 @@ async function archivePresentation(page = 0) {
   return { title: "🗂 Архів", tone: "neutral", blocks };
 }
 
-async function candidatesPresentation() {
+async function candidatesPresentation(page = 0) {
   const data = await apiGet("/api/v1/evidence/candidates?validation_state=accepted&sort=newest");
-  const candidates = (Array.isArray(data.items) ? data.items : []).filter(
-    (item) => !item.decision_type && item.event_id,
-  );
+  const result = candidatePage(Array.isArray(data.items) ? data.items : [], page);
+  const blocks = [
+    textBlock(`Candidates, що очікують рішення: ${result.total} · сторінка ${result.page + 1}/${result.maxPage + 1}`),
+  ];
 
-  const byEvent = new Map();
-  for (const item of candidates) {
-    if (!byEvent.has(item.event_id)) byEvent.set(item.event_id, []);
-    byEvent.get(item.event_id).push(item);
-  }
-
-  const pendingGroups = [];
-  for (const [eventId, items] of byEvent.entries()) {
-    let rec = null;
-    try {
-      const recommendationData = await apiGet(
-        `/api/v1/events/${encodeURIComponent(eventId)}/latest-recommendation`,
-      );
-      rec = recommendationData.recommendation || null;
-    } catch {
-      rec = null;
-    }
-
-    if (!rec || rec.decision || (!rec.actionable && !rec.can_keep_current)) continue;
-    const matching = items.filter(
-      (item) => Number(item.refresh_event_result_id) === Number(rec.refresh_event_result_id),
-    );
-    if (matching.length) pendingGroups.push({ eventId, items: matching, rec });
-  }
-
-  const pendingCount = pendingGroups.reduce((sum, group) => sum + group.items.length, 0);
-  const blocks = [textBlock(`Candidates, що очікують рішення: ${pendingCount}`)];
-
-  if (!pendingGroups.length) {
-    blocks.push(textBlock("Немає candidate evidence, для яких зараз потрібне рішення."));
+  if (!result.items.length) {
+    blocks.push(textBlock("Немає Candidate Evidence, що очікують рішення."));
   } else {
-    for (const group of pendingGroups) {
-      const token = eventToken(group.eventId);
-      const first = group.items[0];
-      const eventTitle = first.event_title || group.eventId;
-      blocks.push(
-        textBlock(
-          [
-            shortText(eventTitle, 180),
-            `Refresh #${first.refresh_id} · candidates: ${group.items.length}`,
-            ...group.items.slice(0, 3).map(
-              (item) =>
-                `#${item.ordinal} · ${evidenceDirectionLabel(item.direction)}${item.strength ? ` · ${item.strength}` : ""}\n${shortText(item.summary || item.title || "Без опису", 260)}`,
-            ),
-            group.items.length > 3 ? `Ще candidates: ${group.items.length - 3}` : null,
-          ].filter(Boolean).join("\n"),
-        ),
-      );
+    for (const item of result.items) {
       blocks.push(
         buttonsBlock([
-          button(`🎯 Рішення · Refresh #${first.refresh_id}`, `recommendation:${token}`, "primary"),
+          button(
+            `#${item.candidate_id} · ${shortText(item.event_title || item.event_id, 52)}`.slice(0, 80),
+            candidateRoute(item.candidate_id),
+            "primary",
+          ),
         ]),
       );
     }
   }
 
+  const pager = [];
+  if (result.page > 0) pager.push(button("◀️ Попередня", `candidates:${result.page - 1}`));
+  if (result.page < result.maxPage) pager.push(button("Наступна ▶️", `candidates:${result.page + 1}`));
+  if (pager.length) blocks.push(buttonsBlock(pager));
+
   blocks.push(buttonsBlock([button("🏠 Головне меню", "home")]));
   return { title: "📥 Candidate Evidence", tone: "neutral", blocks };
+}
+
+async function candidatePresentation(candidateId) {
+  const data = await apiGet("/api/v1/evidence/candidates?validation_state=accepted&sort=newest");
+  const item = (Array.isArray(data.items) ? data.items : []).find(
+    (candidate) => Number(candidate.candidate_id) === Number(candidateId),
+  );
+
+  if (!item || item.decision_type) {
+    return {
+      title: "Candidate недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock("Candidate вже оброблений або більше не доступний."),
+        buttonsBlock([button("◀️ До Candidates", "candidates")]),
+      ],
+    };
+  }
+
+  return {
+    title: `📥 Candidate #${item.candidate_id}`,
+    tone: "neutral",
+    blocks: [
+      textBlock([
+        item.event_title || item.event_id,
+        `${evidenceDirectionLabel(item.direction)}${item.strength ? ` · ${item.strength}` : ""}`,
+        shortText(item.summary || item.title || "Без опису", 700),
+        item.source ? `Джерело: ${item.source}` : null,
+        item.url || null,
+      ].filter(Boolean).join("\n")),
+      buttonsBlock([
+        button("◀️ До Candidates", "candidates"),
+        button("🏠 Головне меню", "home"),
+      ]),
+    ],
+  };
 }
 
 async function recommendationsPresentation() {
@@ -1820,7 +1827,14 @@ async function manageEventsPresentation(page = 0) {
 async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
-  if (payload === "candidates") return await candidatesPresentation();
+  if (payload === "candidates") return await candidatesPresentation(0);
+  if (payload.startsWith("candidates:")) {
+    const page = Number(payload.slice("candidates:".length));
+    return await candidatesPresentation(Number.isInteger(page) && page >= 0 ? page : 0);
+  }
+  if (payload.startsWith("candidate:")) {
+    return await candidatePresentation(parseCandidateRoute(payload));
+  }
   if (payload.startsWith("evidence-rec-apply:")) {
     const r=parseEvidenceRecommendationRoute(payload,"evidence-rec-apply:",true); const eventId=await resolveEventId(r.token,{activeOnly:true});
     return await appliedEvidenceRecommendationPresentation(eventId,r.evidenceId,r.baselineAssessmentId,r.recommendationId,r.probability,ctx);
