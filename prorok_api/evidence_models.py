@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 EvidenceDirection = Literal["indicator", "counterindicator", "neutral"]
@@ -48,6 +48,13 @@ class EvidenceAssessmentDTO(BaseModel):
     decided_at: str | None = None
 
 
+class EvidenceProrokAppDTO(BaseModel):
+    state: Literal["marked", "unmarked"] = "unmarked"
+    source: str | None = None
+    actor: str | None = None
+    changed_at: str | None = None
+
+
 class EvidenceListItemDTO(BaseModel):
     evidence_id: int
     run_id: int | None
@@ -60,6 +67,7 @@ class EvidenceListItemDTO(BaseModel):
     event: EvidenceEventDTO
     source: EvidenceSourceDTO
     assessment: EvidenceAssessmentDTO
+    prorok_app: EvidenceProrokAppDTO = Field(default_factory=EvidenceProrokAppDTO)
 
 
 class EvidenceListResponse(BaseModel):
