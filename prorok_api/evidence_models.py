@@ -124,3 +124,31 @@ class CandidateEvidenceListResponse(BaseModel):
     items: list[CandidateEvidenceDTO]
     total: int
     filtered_total: int
+
+
+class CandidateAssessmentRecommendationResponse(BaseModel):
+    candidate_assessment_recommendation_id: int
+    candidate_id: int
+    event_id_snapshot: str
+    baseline_assessment_id: int
+    baseline_probability: int
+    recommended_probability: int
+    probability_delta: int
+    recommended_band: str
+    recommended_label: str
+    recommendation_confidence: Literal["low", "medium", "high"]
+    change_from_baseline: Literal["increase", "decrease", "no_update"]
+    net_evidence_direction: Literal["positive", "negative", "balanced"]
+    net_evidence_impact: Literal["none", "weak", "moderate", "strong"]
+    baseline_incorporation: Literal["low", "medium", "high"]
+    category_transition: bool
+    recommendation_rationale: str
+    delta_justification: str
+    methodology_version: str
+    parser_version: str
+    agent_id: str | None
+    model_used: str | None
+    run_id: int | None
+    source_run_key: str | None
+    created_at: str
+    status: Literal["ready", "stale", "error"]
