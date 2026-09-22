@@ -2,6 +2,7 @@ def test_official_evidence_page(logged_in_client):
     async def list_evidence(**kwargs):
         assert kwargs["direction"] == "indicator"
         assert kwargs["sort"] == "newest"
+        assert kwargs["prorok_app"] is None
         return {
             "items": [
                 {
@@ -21,6 +22,12 @@ def test_official_evidence_page(logged_in_client):
                         "refresh_id": None,
                         "assessment_id": None,
                         "decided_at": None,
+                    },
+                    "prorok_app": {
+                        "state": "marked",
+                        "source": "telegram",
+                        "actor": "tester",
+                        "changed_at": "2026-09-17T09:00:00Z",
                     },
                     "event": {
                         "event_id": "event-1",
@@ -50,6 +57,8 @@ def test_official_evidence_page(logged_in_client):
     assert "Trusted source" in response.text
     assert "Evidence #42" in response.text
     assert "Candidates" in response.text
+    assert "PROROK_APP" in response.text
+    assert "внесено" in response.text
     assert "secret-upstream-token" not in response.text
 
 
@@ -173,20 +182,20 @@ def test_candidate_evidence_defaults_to_pending(logged_in_client):
                     "event_title": "Test event",
                     "ordinal": 1,
                     "direction": "indicator",
-                    "strength": "medium",
-                    "relevance": 80,
-                    "credibility": 80,
-                    "title": "Pending candidate",
-                    "source": "Source",
-                    "url": "https://example.com/pending",
+                    "strength": "weak",
+                    "relevance": 60,
+                    "credibility": 60,
+                    "title": "Pending accepted",
+                    "source": "Source A",
+                    "url": "https://example.com/a",
                     "published_at": None,
-                    "summary": "Pending summary",
+                    "summary": "Pending",
                     "why_it_matters": None,
-                    "duplicate_risk": "low",
-                    "freshness": "new",
+                    "duplicate_risk": None,
+                    "freshness": None,
                     "validation_state": "accepted",
                     "rejection_reason": None,
-                    "created_at": "2026-09-20T10:00:00Z",
+                    "created_at": "2026-09-17T10:00:00Z",
                     "decision_id": None,
                     "decision_type": None,
                     "selected_probability": None,
@@ -197,33 +206,33 @@ def test_candidate_evidence_defaults_to_pending(logged_in_client):
                 },
                 {
                     "candidate_id": 2,
-                    "refresh_event_result_id": 2,
+                    "refresh_event_result_id": 1,
                     "refresh_id": 1,
                     "event_id": "event-1",
                     "event_title": "Test event",
                     "ordinal": 2,
                     "direction": "counterindicator",
                     "strength": "weak",
-                    "relevance": 70,
-                    "credibility": 70,
-                    "title": "Processed candidate",
-                    "source": "Source",
-                    "url": "https://example.com/processed",
+                    "relevance": 60,
+                    "credibility": 60,
+                    "title": "Already processed",
+                    "source": "Source B",
+                    "url": "https://example.com/b",
                     "published_at": None,
-                    "summary": "Processed summary",
+                    "summary": "Processed",
                     "why_it_matters": None,
-                    "duplicate_risk": "low",
-                    "freshness": "new",
+                    "duplicate_risk": None,
+                    "freshness": None,
                     "validation_state": "accepted",
                     "rejection_reason": None,
-                    "created_at": "2026-09-20T09:00:00Z",
-                    "decision_id": 5,
+                    "created_at": "2026-09-17T10:01:00Z",
+                    "decision_id": 2,
                     "decision_type": "keep_current",
                     "selected_probability": 35,
-                    "decided_at": "2026-09-20T11:00:00Z",
+                    "decided_at": "2026-09-17T10:02:00Z",
                     "promotion_action": "inserted",
-                    "evidence_id": 18,
-                    "promoted_at": "2026-09-20T11:00:01Z",
+                    "evidence_id": 77,
+                    "promoted_at": "2026-09-17T10:02:01Z",
                 },
             ],
             "total": 2,
@@ -234,6 +243,5 @@ def test_candidate_evidence_defaults_to_pending(logged_in_client):
     response = logged_in_client.get("/evidence?tab=candidates")
 
     assert response.status_code == 200
-    assert "Pending candidate" in response.text
-    assert "Processed candidate" not in response.text
-    assert "Очікують рішення" in response.text
+    assert "Pending accepted" in response.text
+    assert "Already processed" not in response.text
