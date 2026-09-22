@@ -23,6 +23,7 @@ const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_st
 const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/prorok_refresh_all_dry_run_quiet.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
+const CANDIDATE_REVIEW_CLI = "prorok/prorok_candidate_review_cli.py";
 const execFileAsync = promisify(execFile);
 const CUSTOM_PROBABILITY_VALUES = [
   0, 5,
@@ -1860,6 +1861,10 @@ async function candidateRecommendationPresentation(candidateId) {
       `/api/v1/evidence/candidates/${candidateId}/recommendation`,
     );
     const delta = Number(rec.probability_delta);
+    const recommendationId = Number(rec.candidate_assessment_recommendation_id);
+    if (!Number.isInteger(recommendationId) || recommendationId <= 0) {
+      throw new Error("Candidate recommendation id is missing");
+    }
 
     return {
       title: "🤖 PROROK · Candidate recommendation",
@@ -1880,6 +1885,10 @@ async function candidateRecommendationPresentation(candidateId) {
           "",
           "Official evidence та forecast не змінено.",
         ].join("\n")),
+        buttonsBlock([
+          button("✅ Прийняти Candidate", `candidate-review:${candidateId}:${recommendationId}:accept`, "success"),
+          button("❌ Відхилити Candidate", `candidate-review:${candidateId}:${recommendationId}:reject`),
+        ]),
         buttonsBlock([
           button("◀️ До Candidate", `candidate:${candidateId}`),
           button("📥 До Candidates", "candidates"),
@@ -1905,6 +1914,131 @@ async function candidateRecommendationPresentation(candidateId) {
   }
 }
 
+
+function parseCandidateReviewRoute(payload, prefix) {
+  const parts = payload.slice(prefix.length).split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid PROROK candidate review callback payload");
+  }
+  const [candidateRaw, recommendationRaw, decision] = parts;
+  if (!/^\d+$/.test(candidateRaw) || !/^\d+$/.test(recommendationRaw) ||
+      !["accept", "reject"].includes(decision)) {
+    throw new Error("Invalid PROROK candidate review callback payload");
+  }
+  return {
+    candidateId: Number(candidateRaw),
+    recommendationId: Number(recommendationRaw),
+    decision,
+  };
+}
+
+async function candidateReviewConfirmPresentation(candidateId, recommendationId, decision) {
+  const data = await apiGet(
+    "/api/v1/evidence/candidates?validation_state=accepted&sort=newest",
+  );
+  const candidate = (Array.isArray(data.items) ? data.items : []).find(
+    (item) => Number(item.candidate_id) === Number(candidateId),
+  );
+
+  if (!candidate || candidate.decision_type) {
+    return {
+      title: "PROROK · Candidate недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock("Candidate вже оброблений або більше не доступний. Жодних змін не виконано."),
+        buttonsBlock([button("📥 До Candidates", "candidates")]),
+      ],
+    };
+  }
+
+  const accepting = decision === "accept";
+
+  return {
+    title: accepting ? "Підтвердити Candidate" : "Підтвердити відхилення",
+    tone: "neutral",
+    blocks: [
+      textBlock([
+        `Candidate #${candidateId}`,
+        shortText(candidate.summary || candidate.title || "—", 600),
+        `Recommendation #${recommendationId}`,
+        "",
+        accepting
+          ? "Candidate буде перенесено до official evidence."
+          : "Candidate буде відхилено і не стане official evidence.",
+        "Ця дія буде записана як review decision.",
+      ].join("\n")),
+      buttonsBlock([
+        button(
+          accepting ? "✅ Так, прийняти" : "❌ Так, відхилити",
+          `candidate-review-apply:${candidateId}:${recommendationId}:${decision}`,
+          accepting ? "success" : undefined,
+        ),
+        button("◀️ Скасувати", `candidate-rec:${candidateId}`),
+      ]),
+    ],
+  };
+}
+
+async function appliedCandidateReviewPresentation(candidateId, recommendationId, decision, ctx) {
+  const args = [
+    CANDIDATE_REVIEW_CLI,
+    "--db", PROROK_DB_PATH,
+    "decide", String(candidateId), decision,
+    "--recommendation-id", String(recommendationId),
+    "--source", "telegram",
+  ];
+
+  const actor = telegramActorSnapshot(ctx);
+  if (actor) args.push("--actor", String(actor));
+
+  try {
+    const { stdout } = await execFileAsync(PYTHON_BIN, args, {
+      timeout: 20000,
+      maxBuffer: 64 * 1024,
+      env: process.env,
+    });
+
+    const fields = parseCliKeyValues(stdout);
+
+    return {
+      title: decision === "accept"
+        ? "✅ PROROK · Candidate прийнято"
+        : "✅ PROROK · Candidate відхилено",
+      tone: "neutral",
+      blocks: [
+        textBlock([
+          `Candidate #${candidateId}`,
+          `Recommendation #${recommendationId}`,
+          `Рішення: ${decision}`,
+          decision === "accept"
+            ? `Official evidence: #${fields.evidence_id || "—"}`
+            : "Official evidence не створено.",
+        ].join("\n")),
+        buttonsBlock([
+          button("📥 До Candidates", "candidates"),
+          button("🏠 Головне меню", "home"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Рішення не застосовано",
+      tone: "neutral",
+      blocks: [
+        textBlock([
+          decisionErrorText(error),
+          "",
+          "Жодних часткових змін не повинно бути committed.",
+        ].join("\n")),
+        buttonsBlock([
+          button("◀️ До Candidate", `candidate:${candidateId}`),
+          button("📥 До Candidates", "candidates"),
+        ]),
+      ],
+    };
+  }
+}
+
 async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
@@ -1912,6 +2046,18 @@ async function renderPayload(payload, ctx = null) {
   if (payload.startsWith("candidates:")) {
     const page = Number(payload.slice("candidates:".length));
     return await candidatesPresentation(Number.isInteger(page) && page >= 0 ? page : 0);
+  }
+  if (payload.startsWith("candidate-review-apply:")) {
+    const r = parseCandidateReviewRoute(payload, "candidate-review-apply:");
+    return await appliedCandidateReviewPresentation(
+      r.candidateId, r.recommendationId, r.decision, ctx,
+    );
+  }
+  if (payload.startsWith("candidate-review:")) {
+    const r = parseCandidateReviewRoute(payload, "candidate-review:");
+    return await candidateReviewConfirmPresentation(
+      r.candidateId, r.recommendationId, r.decision,
+    );
   }
   if (payload.startsWith("candidate-rec:")) {
     const raw = payload.slice("candidate-rec:".length);
