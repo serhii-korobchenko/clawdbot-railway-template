@@ -1,4 +1,4 @@
-from prorok_candidate_aggregation import aggregate_same_source_candidates
+from prorok.prorok_candidate_aggregation import aggregate_same_source_candidates
 
 
 def candidate(url, direction, strength="medium", relevance=80, credibility=90, summary="fact"):

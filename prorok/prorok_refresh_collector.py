@@ -26,10 +26,12 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 try:
+    from .prorok_candidate_aggregation import aggregate_same_source_candidates
     from .prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
     from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
     from .prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
 except ImportError:  # direct script execution from /app/prorok
+    from prorok_candidate_aggregation import aggregate_same_source_candidates
     from prorok_evidence_cli import CliError as EvidenceCliError, canonicalize_url
     from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
     from prorok_refresh_parser import PARSER_VERSION, RefreshParseError, parse_refresh_report
@@ -285,6 +287,27 @@ def summary_fallback(run: CronRun) -> tuple[str, str] | None:
 
 def candidate_rows(parsed: Any) -> list[dict[str, Any]]:
     return [candidate.as_dict() for candidate in parsed.candidates]
+
+
+def aggregate_validated_candidate_rows(
+    parsed: Any,
+    candidate_validation: dict[int, dict[str, str | None]],
+) -> list[dict[str, Any]]:
+    rows = candidate_rows(parsed)
+    accepted = [
+        row for row in rows
+        if candidate_validation[row["ordinal"]]["validation_state"] == "accepted"
+    ]
+    rejected = [
+        row for row in rows
+        if candidate_validation[row["ordinal"]]["validation_state"] != "accepted"
+    ]
+
+    aggregated = aggregate_same_source_candidates(accepted) if accepted else []
+
+    # Keep a real component ordinal as the stable quarantine identifier.
+    # aggregate_same_source_candidates already chooses a representative component.
+    return aggregated + rejected
 
 
 def _parse_iso_datetime(value: str, field: str) -> tuple[datetime, bool]:
@@ -556,6 +579,7 @@ def apply_success(
     transcript: str,
     transcript_sha256: str,
     parsed: Any,
+    quarantine_rows: list[dict[str, Any]],
     candidate_validation: dict[int, dict[str, str | None]],
 ) -> None:
     source_run_key = run.source_run_key
@@ -592,10 +616,14 @@ def apply_success(
     fields = parsed.event_result_fields()
     accepted = [
         candidate
-        for candidate in parsed.candidates
-        if candidate_validation[candidate.ordinal]["validation_state"] == "accepted"
+        for candidate in quarantine_rows
+        if candidate_validation[candidate["ordinal"]]["validation_state"] == "accepted"
     ]
-    rejected_count = len(parsed.candidates) - len(accepted)
+    rejected_count = sum(
+        1
+        for candidate in quarantine_rows
+        if candidate_validation[candidate["ordinal"]]["validation_state"] != "accepted"
+    )
     recommendation_valid = rejected_count == 0
 
     fields["outcome"] = (
@@ -604,10 +632,10 @@ def apply_success(
     )
     fields["new_evidence_count"] = len(accepted)
     fields["indicator_count"] = sum(
-        1 for candidate in accepted if candidate.direction == "indicator"
+        1 for candidate in accepted if candidate["direction"] == "indicator"
     )
     fields["counterindicator_count"] = sum(
-        1 for candidate in accepted if candidate.direction == "counterindicator"
+        1 for candidate in accepted if candidate["direction"] == "counterindicator"
     )
     fields["candidate_rejected_count"] = rejected_count
     fields["recommendation_valid"] = int(recommendation_valid)
@@ -667,7 +695,7 @@ def apply_success(
         (row["refresh_event_result_id"],),
     )
 
-    for candidate in candidate_rows(parsed):
+    for candidate in quarantine_rows:
         conn.execute(
             """
             INSERT INTO refresh_candidate_evidence(
@@ -857,7 +885,11 @@ def collect_one(
             expected_baseline_probability=row["baseline_probability"],
         )
         candidate_validation = validate_candidates(conn, row, parsed)
-    except RefreshParseError as exc:
+        quarantine_rows = aggregate_validated_candidate_rows(
+            parsed,
+            candidate_validation,
+        )
+    except (RefreshParseError, ValueError) as exc:
         with conn:
             mark_failure(
                 conn,
@@ -888,6 +920,7 @@ def collect_one(
                 transcript,
                 transcript_sha256,
                 parsed,
+                quarantine_rows,
                 candidate_validation,
             )
             recompute_batch(conn, row["refresh_id"])
