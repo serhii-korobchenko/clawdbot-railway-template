@@ -1610,6 +1610,9 @@ async function candidatePresentation(candidateId) {
         item.url || null,
       ].filter(Boolean).join("\n")),
       buttonsBlock([
+        button("🤖 Оцінити вплив", `candidate-rec:${item.candidate_id}`, "primary"),
+      ]),
+      buttonsBlock([
         button("◀️ До Candidates", "candidates"),
         button("🏠 Головне меню", "home"),
       ]),
@@ -1824,6 +1827,84 @@ async function manageEventsPresentation(page = 0) {
   return { title: "🗂 Керування подіями", tone: "neutral", blocks };
 }
 
+
+async function candidateRecommendationPresentation(candidateId) {
+  const data = await apiGet(
+    "/api/v1/evidence/candidates?validation_state=accepted&sort=newest",
+  );
+  const candidate = (Array.isArray(data.items) ? data.items : []).find(
+    (item) => Number(item.candidate_id) === Number(candidateId),
+  );
+
+  if (!candidate || candidate.decision_type) {
+    throw new Error(`Candidate #${candidateId} is no longer available`);
+  }
+
+  try {
+    await execFileAsync(
+      PYTHON_BIN,
+      [
+        "prorok/prorok_candidate_recommendation_cli.py",
+        String(candidateId),
+        "--db",
+        PROROK_DB_PATH,
+      ],
+      {
+        timeout: 200000,
+        maxBuffer: 128 * 1024,
+        env: process.env,
+      },
+    );
+
+    const rec = await apiGet(
+      `/api/v1/evidence/candidates/${candidateId}/recommendation`,
+    );
+    const delta = Number(rec.probability_delta);
+
+    return {
+      title: "🤖 PROROK · Candidate recommendation",
+      tone: "neutral",
+      blocks: [
+        textBlock([
+          `Candidate #${candidateId}`,
+          shortText(candidate.summary || candidate.title || "—", 500),
+          "",
+          `Поточний прогноз: ${rec.baseline_probability}%`,
+          `Рекомендація PROROK: ${rec.recommended_probability}%`,
+          `Зміна: ${delta > 0 ? "+" : ""}${delta} п.п.`,
+          `Confidence: ${rec.recommendation_confidence}`,
+          `Напрям / вплив: ${rec.net_evidence_direction} · ${rec.net_evidence_impact}`,
+          "",
+          `Обґрунтування: ${shortText(rec.recommendation_rationale, 700)}`,
+          `Чому саме ця оцінка: ${shortText(rec.delta_justification, 700)}`,
+          "",
+          "Official evidence та forecast не змінено.",
+        ].join("\n")),
+        buttonsBlock([
+          button("◀️ До Candidate", `candidate:${candidateId}`),
+          button("📥 До Candidates", "candidates"),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK · Рекомендацію не отримано",
+      tone: "neutral",
+      blocks: [
+        textBlock([
+          decisionErrorText(error),
+          "",
+          "Official evidence та forecast не змінено.",
+        ].join("\n")),
+        buttonsBlock([
+          button("◀️ До Candidate", `candidate:${candidateId}`),
+          button("📥 До Candidates", "candidates"),
+        ]),
+      ],
+    };
+  }
+}
+
 async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
@@ -1831,6 +1912,13 @@ async function renderPayload(payload, ctx = null) {
   if (payload.startsWith("candidates:")) {
     const page = Number(payload.slice("candidates:".length));
     return await candidatesPresentation(Number.isInteger(page) && page >= 0 ? page : 0);
+  }
+  if (payload.startsWith("candidate-rec:")) {
+    const raw = payload.slice("candidate-rec:".length);
+    if (!/^\d+$/.test(raw)) {
+      throw new Error("Invalid PROROK candidate recommendation callback payload");
+    }
+    return await candidateRecommendationPresentation(Number(raw));
   }
   if (payload.startsWith("candidate:")) {
     return await candidatePresentation(parseCandidateRoute(payload));
