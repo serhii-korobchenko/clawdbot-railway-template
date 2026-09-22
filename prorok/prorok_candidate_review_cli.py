@@ -9,6 +9,7 @@ try:
         assert_candidate_source_not_already_official, upsert_candidate_source,
     )
 except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from prorok_refresh_decision_cli import (
         CliError, connect, resolve_db, schema_version, fetch_one, utc_now,
         assert_candidate_source_not_already_official, upsert_candidate_source,
