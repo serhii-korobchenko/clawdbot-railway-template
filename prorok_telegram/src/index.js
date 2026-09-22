@@ -9,6 +9,7 @@ const CALLBACK_NAMESPACE = "prorok";
 const EVENT_TOKEN_LENGTH = 12;
 const GLOBAL_EVIDENCE_PAGE_SIZE = 5;
 const EVENT_LIST_PAGE_SIZE = 8;
+const EVENT_HISTORY_PAGE_SIZE = 5;
 const DECISION_CLI = process.env.PROROK_DECISION_CLI || "/app/prorok/prorok_refresh_decision_cli.py";
 const EVIDENCE_ASSESSMENT_CLI = process.env.PROROK_EVIDENCE_ASSESSMENT_CLI || "/app/prorok/prorok_evidence_assessment_cli.py";
 const EVIDENCE_RECOMMENDATION_CLI = process.env.PROROK_EVIDENCE_RECOMMENDATION_CLI || "/app/prorok/prorok_evidence_recommendation_cli.py";
@@ -1240,19 +1241,28 @@ async function eventEvidencePresentation(eventId) {
   return { title: `🧾 ${event.title}`, tone: "neutral", blocks };
 }
 
-async function eventHistoryPresentation(eventId) {
+async function eventHistoryPresentation(eventId, page = 0) {
   const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
   const event = data.event;
   const assessments = Array.isArray(data.assessments) ? data.assessments : [];
   const token = eventToken(event.event_id);
-  const blocks = [textBlock(`Assessment history: ${assessments.length}`)];
+  const maxPage = Math.max(0, Math.ceil(assessments.length / EVENT_HISTORY_PAGE_SIZE) - 1);
+  const safePage = Math.min(Math.max(Number(page) || 0, 0), maxPage);
+  const start = safePage * EVENT_HISTORY_PAGE_SIZE;
+  const pageItems = assessments.slice(start, start + EVENT_HISTORY_PAGE_SIZE);
+  const blocks = [
+    textBlock(`Assessment history: ${assessments.length} · сторінка ${safePage + 1}/${maxPage + 1}`),
+  ];
 
-  if (!assessments.length) {
+  if (!pageItems.length) {
     blocks.push(textBlock("Історії оцінок поки немає."));
   } else {
-    for (const item of assessments.slice(0, 12)) {
+    for (const item of pageItems) {
       const delta = item.delta_from_previous;
-      const deltaText = delta === null || delta === undefined ? "—" : `${delta > 0 ? "+" : ""}${delta} п.п.`;
+      const deltaText =
+        delta === null || delta === undefined
+          ? "—"
+          : `${delta > 0 ? "+" : ""}${delta} п.п.`;
       blocks.push(
         textBlock(
           [
@@ -1263,8 +1273,16 @@ async function eventHistoryPresentation(eventId) {
         ),
       );
     }
-    if (assessments.length > 12) blocks.push(textBlock(`Показано 12 з ${assessments.length} assessment.`));
   }
+
+  const pager = [];
+  if (safePage > 0) {
+    pager.push(button("◀️ Попередня", `event-history:${token}:${safePage - 1}`));
+  }
+  if (safePage < maxPage) {
+    pager.push(button("Наступна ▶️", `event-history:${token}:${safePage + 1}`));
+  }
+  if (pager.length) blocks.push(buttonsBlock(pager));
 
   blocks.push(
     buttonsBlock([
@@ -1917,8 +1935,14 @@ async function renderPayload(payload, ctx = null) {
     return await eventEvidencePresentation(eventId);
   }
   if (payload.startsWith("event-history:")) {
-    const eventId = await resolveEventId(payload.slice("event-history:".length));
-    return await eventHistoryPresentation(eventId);
+    const parts = payload.slice("event-history:".length).split(":");
+    const token = parts[0];
+    const rawPage = parts[1] ?? "0";
+    if (!token || parts.length > 2 || !/^\d+$/.test(rawPage)) {
+      throw new Error("Invalid PROROK event-history callback payload");
+    }
+    const eventId = await resolveEventId(token);
+    return await eventHistoryPresentation(eventId, Number.parseInt(rawPage, 10));
   }
   if (payload.startsWith("event-any:")) {
     const eventId = await resolveEventId(payload.slice("event-any:".length));
