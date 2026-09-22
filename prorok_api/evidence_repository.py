@@ -40,312 +40,60 @@ def evidence_activity(conn: sqlite3.Connection, *, status: str = "active", windo
                SUM(CASE WHEN ei.direction = 'neutral' THEN 1 ELSE 0 END) AS neutral_count,
                MAX(strftime('%Y-%m-%dT%H:%M:%fZ', ei.created_at)) AS latest_evidence_at
         FROM events e
-        LEFT JOIN evidence_items ei
-          ON ei.event_id = e.event_id
-          {join_filter}
+        LEFT JOIN evidence_items ei ON ei.event_id = e.event_id {join_filter}
         WHERE e.status = ?
         GROUP BY e.event_id, e.title, e.status
         ORDER BY evidence_count DESC, latest_evidence_at DESC, e.title ASC
-        """,
-        params,
-    ).fetchall()
-
-    items = [{
-        "event_id": row["event_id"],
-        "title": row["title"],
-        "status": row["status"],
-        "evidence_count": int(row["evidence_count"] or 0),
-        "indicator_count": int(row["indicator_count"] or 0),
-        "counterindicator_count": int(row["counterindicator_count"] or 0),
-        "neutral_count": int(row["neutral_count"] or 0),
-        "latest_evidence_at": row["latest_evidence_at"],
-    } for row in rows]
-
-    return {
-        "status": status,
-        "window": window,
-        "generated_at": _iso_utc(generated),
-        "cutoff_at": _iso_utc(cutoff) if cutoff is not None else None,
-        "total_events": len(items),
-        "total_evidence": sum(item["evidence_count"] for item in items),
-        "items": items,
-    }
+        """, params).fetchall()
+    items = [{"event_id": r["event_id"], "title": r["title"], "status": r["status"], "evidence_count": int(r["evidence_count"] or 0), "indicator_count": int(r["indicator_count"] or 0), "counterindicator_count": int(r["counterindicator_count"] or 0), "neutral_count": int(r["neutral_count"] or 0), "latest_evidence_at": r["latest_evidence_at"]} for r in rows]
+    return {"status": status, "window": window, "generated_at": _iso_utc(generated), "cutoff_at": _iso_utc(cutoff) if cutoff is not None else None, "total_events": len(items), "total_evidence": sum(i["evidence_count"] for i in items), "items": items}
 
 
-def list_evidence(
-    conn: sqlite3.Connection,
-    *,
-    event_id: str | None = None,
-    direction: str | None = None,
-    strength: str | None = None,
-    source: str | None = None,
-    q: str | None = None,
-    sort: str = "newest",
-) -> dict[str, Any]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if event_id:
-        clauses.append("ei.event_id = ?")
-        params.append(event_id)
-    if direction:
-        clauses.append("ei.direction = ?")
-        params.append(direction)
-    if strength:
-        clauses.append("ei.strength = ?")
-        params.append(strength)
+def list_evidence(conn: sqlite3.Connection, *, event_id: str | None = None, direction: str | None = None, strength: str | None = None, source: str | None = None, q: str | None = None, sort: str = "newest") -> dict[str, Any]:
+    clauses=[]; params=[]
+    if event_id: clauses.append("ei.event_id = ?"); params.append(event_id)
+    if direction: clauses.append("ei.direction = ?"); params.append(direction)
+    if strength: clauses.append("ei.strength = ?"); params.append(strength)
     if source and source.strip():
-        needle = f"%{source.strip().casefold()}%"
-        clauses.append(
-            "(CASEFOLD(COALESCE(s.domain, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(s.title, '')) LIKE ? OR "
-            "CASEFOLD(s.url) LIKE ? OR "
-            "CASEFOLD(COALESCE(s.source_type, '')) LIKE ?)"
-        )
-        params.extend([needle, needle, needle, needle])
+        needle=f"%{source.strip().casefold()}%"; clauses.append("(CASEFOLD(COALESCE(s.domain, '')) LIKE ? OR CASEFOLD(COALESCE(s.title, '')) LIKE ? OR CASEFOLD(s.url) LIKE ? OR CASEFOLD(COALESCE(s.source_type, '')) LIKE ?)"); params.extend([needle]*4)
     if q and q.strip():
-        needle = f"%{q.strip().casefold()}%"
-        clauses.append(
-            "(CASEFOLD(ei.summary) LIKE ? OR "
-            "CASEFOLD(e.title) LIKE ? OR "
-            "CASEFOLD(e.event_id) LIKE ? OR "
-            "CASEFOLD(COALESCE(s.title, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(s.domain, '')) LIKE ? OR "
-            "CASEFOLD(s.url) LIKE ?)"
-        )
-        params.extend([needle, needle, needle, needle, needle, needle])
-
-    where_sql = "WHERE " + " AND ".join(clauses) if clauses else ""
-    order_direction = "ASC" if sort == "oldest" else "DESC"
-    rows = conn.execute(
-        f"""
-        SELECT
-            ei.evidence_id,
-            ei.run_id,
-            ei.created_at,
-            ei.direction,
-            ei.strength,
-            ei.summary,
-            ei.relevance,
-            ei.credibility,
-            e.event_id,
-            e.title AS event_title,
-            e.status AS event_status,
-            s.source_id,
-            s.title AS source_title,
-            s.domain,
-            s.url,
-            s.canonical_url,
-            s.published_at,
-            s.source_type,
-            p.refresh_event_result_id,
-            rer.refresh_id,
-            d.decision_id,
-            d.decision_type,
-            d.baseline_probability,
-            d.selected_probability,
-            d.assessment_id,
-            d.decided_at,
-            em.evidence_assessment_decision_id AS manual_decision_id,
-            em.baseline_probability AS manual_baseline_probability,
-            em.selected_probability AS manual_selected_probability,
-            em.assessment_id AS manual_assessment_id,
-            em.decided_at AS manual_decided_at
-        FROM evidence_items ei
-        JOIN events e ON e.event_id = ei.event_id
-        JOIN sources s ON s.source_id = ei.source_id
-        LEFT JOIN refresh_candidate_promotions p ON p.evidence_id = ei.evidence_id
-        LEFT JOIN refresh_user_decisions d ON d.decision_id = p.decision_id
-        LEFT JOIN refresh_event_results rer ON rer.refresh_event_result_id = p.refresh_event_result_id
-        LEFT JOIN evidence_assessment_decisions em ON em.evidence_assessment_decision_id = (
-            SELECT em2.evidence_assessment_decision_id FROM evidence_assessment_decisions em2
-            WHERE em2.evidence_id = ei.evidence_id
-            ORDER BY em2.decided_at DESC, em2.evidence_assessment_decision_id DESC LIMIT 1
-        )
-        {where_sql}
-        ORDER BY ei.created_at {order_direction}, ei.evidence_id {order_direction}
-        """,
-        params,
-    ).fetchall()
-
-    total = conn.execute("SELECT COUNT(*) AS n FROM evidence_items").fetchone()["n"]
-    items = [
-        {
-            "evidence_id": row["evidence_id"],
-            "run_id": row["run_id"],
-            "created_at": row["created_at"],
-            "direction": row["direction"],
-            "strength": row["strength"],
-            "summary": row["summary"],
-            "relevance": row["relevance"],
-            "credibility": row["credibility"],
-            "event": {
-                "event_id": row["event_id"],
-                "title": row["event_title"],
-                "status": row["event_status"],
-            },
-            "source": {
-                "source_id": row["source_id"],
-                "title": row["source_title"],
-                "domain": row["domain"],
-                "url": row["url"],
-                "canonical_url": row["canonical_url"],
-                "published_at": row["published_at"],
-                "source_type": row["source_type"],
-            },
-            "assessment": {
-                "status": (
-                    ("assessed_unchanged" if int(row["manual_selected_probability"]) == int(row["manual_baseline_probability"]) else "assessed_changed")
-                    if row["manual_decision_id"] is not None
-                    else (
-                        "unknown" if row["decision_id"] is None
-                        else ("assessed_unchanged" if int(row["selected_probability"]) == int(row["baseline_probability"]) else "assessed_changed")
-                    )
-                ),
-                "provenance_type": "evidence_manual" if row["manual_decision_id"] is not None else ("refresh" if row["decision_id"] is not None else None),
-                "evidence_assessment_decision_id": row["manual_decision_id"],
-                "refresh_id": None if row["manual_decision_id"] is not None else row["refresh_id"],
-                "refresh_event_result_id": None if row["manual_decision_id"] is not None else row["refresh_event_result_id"],
-                "decision_id": None if row["manual_decision_id"] is not None else row["decision_id"],
-                "decision_type": "evidence_manual" if row["manual_decision_id"] is not None else row["decision_type"],
-                "baseline_probability": row["manual_baseline_probability"] if row["manual_decision_id"] is not None else row["baseline_probability"],
-                "selected_probability": row["manual_selected_probability"] if row["manual_decision_id"] is not None else row["selected_probability"],
-                "assessment_id": row["manual_assessment_id"] if row["manual_decision_id"] is not None else row["assessment_id"],
-                "decided_at": row["manual_decided_at"] if row["manual_decision_id"] is not None else row["decided_at"],
-            },
-        }
-        for row in rows
-    ]
-    return {"items": items, "total": int(total), "filtered_total": len(items)}
+        needle=f"%{q.strip().casefold()}%"; clauses.append("(CASEFOLD(ei.summary) LIKE ? OR CASEFOLD(e.title) LIKE ? OR CASEFOLD(e.event_id) LIKE ? OR CASEFOLD(COALESCE(s.title, '')) LIKE ? OR CASEFOLD(COALESCE(s.domain, '')) LIKE ? OR CASEFOLD(s.url) LIKE ?)"); params.extend([needle]*6)
+    where_sql="WHERE "+" AND ".join(clauses) if clauses else ""; od="ASC" if sort=="oldest" else "DESC"
+    rows=conn.execute(f"""SELECT ei.evidence_id,ei.run_id,ei.created_at,ei.direction,ei.strength,ei.summary,ei.relevance,ei.credibility,e.event_id,e.title AS event_title,e.status AS event_status,s.source_id,s.title AS source_title,s.domain,s.url,s.canonical_url,s.published_at,s.source_type,p.refresh_event_result_id,rer.refresh_id,d.decision_id,d.decision_type,d.baseline_probability,d.selected_probability,d.assessment_id,d.decided_at,em.evidence_assessment_decision_id AS manual_decision_id,em.baseline_probability AS manual_baseline_probability,em.selected_probability AS manual_selected_probability,em.assessment_id AS manual_assessment_id,em.decided_at AS manual_decided_at FROM evidence_items ei JOIN events e ON e.event_id=ei.event_id JOIN sources s ON s.source_id=ei.source_id LEFT JOIN refresh_candidate_promotions p ON p.evidence_id=ei.evidence_id LEFT JOIN refresh_user_decisions d ON d.decision_id=p.decision_id LEFT JOIN refresh_event_results rer ON rer.refresh_event_result_id=p.refresh_event_result_id LEFT JOIN evidence_assessment_decisions em ON em.evidence_assessment_decision_id=(SELECT em2.evidence_assessment_decision_id FROM evidence_assessment_decisions em2 WHERE em2.evidence_id=ei.evidence_id ORDER BY em2.decided_at DESC,em2.evidence_assessment_decision_id DESC LIMIT 1) {where_sql} ORDER BY ei.created_at {od},ei.evidence_id {od}""",params).fetchall()
+    total=conn.execute("SELECT COUNT(*) AS n FROM evidence_items").fetchone()["n"]
+    items=[]
+    for r in rows:
+        manual=r["manual_decision_id"] is not None; bp=r["manual_baseline_probability"] if manual else r["baseline_probability"]; sp=r["manual_selected_probability"] if manual else r["selected_probability"]
+        items.append({"evidence_id":r["evidence_id"],"run_id":r["run_id"],"created_at":r["created_at"],"direction":r["direction"],"strength":r["strength"],"summary":r["summary"],"relevance":r["relevance"],"credibility":r["credibility"],"event":{"event_id":r["event_id"],"title":r["event_title"],"status":r["event_status"]},"source":{"source_id":r["source_id"],"title":r["source_title"],"domain":r["domain"],"url":r["url"],"canonical_url":r["canonical_url"],"published_at":r["published_at"],"source_type":r["source_type"]},"assessment":{"status":("unknown" if (not manual and r["decision_id"] is None) else ("assessed_unchanged" if int(sp)==int(bp) else "assessed_changed")),"provenance_type":"evidence_manual" if manual else ("refresh" if r["decision_id"] is not None else None),"evidence_assessment_decision_id":r["manual_decision_id"],"refresh_id":None if manual else r["refresh_id"],"refresh_event_result_id":None if manual else r["refresh_event_result_id"],"decision_id":None if manual else r["decision_id"],"decision_type":"evidence_manual" if manual else r["decision_type"],"baseline_probability":bp,"selected_probability":sp,"assessment_id":r["manual_assessment_id"] if manual else r["assessment_id"],"decided_at":r["manual_decided_at"] if manual else r["decided_at"]}})
+    return {"items":items,"total":int(total),"filtered_total":len(items)}
 
 
-def list_candidate_evidence(
-    conn: sqlite3.Connection,
-    *,
-    event_id: str | None = None,
-    direction: str | None = None,
-    strength: str | None = None,
-    validation_state: str | None = None,
-    source: str | None = None,
-    q: str | None = None,
-    sort: str = "newest",
-) -> dict[str, Any]:
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if event_id:
-        clauses.append("rer.event_id = ?")
-        params.append(event_id)
-    if direction:
-        clauses.append("c.direction = ?")
-        params.append(direction)
-    if strength:
-        clauses.append("c.strength = ?")
-        params.append(strength)
-    if validation_state:
-        clauses.append("c.validation_state = ?")
-        params.append(validation_state)
+def list_candidate_evidence(conn: sqlite3.Connection, *, event_id: str | None = None, direction: str | None = None, strength: str | None = None, validation_state: str | None = None, source: str | None = None, q: str | None = None, sort: str = "newest") -> dict[str, Any]:
+    clauses=[]; params=[]
+    if event_id: clauses.append("rer.event_id = ?"); params.append(event_id)
+    if direction: clauses.append("c.direction = ?"); params.append(direction)
+    if strength: clauses.append("c.strength = ?"); params.append(strength)
+    if validation_state: clauses.append("c.validation_state = ?"); params.append(validation_state)
     if source and source.strip():
-        needle = f"%{source.strip().casefold()}%"
-        clauses.append(
-            "(CASEFOLD(COALESCE(c.source, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.title, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.url, '')) LIKE ?)"
-        )
-        params.extend([needle, needle, needle])
+        needle=f"%{source.strip().casefold()}%"; clauses.append("(CASEFOLD(COALESCE(c.source, '')) LIKE ? OR CASEFOLD(COALESCE(c.title, '')) LIKE ? OR CASEFOLD(COALESCE(c.url, '')) LIKE ?)"); params.extend([needle]*3)
     if q and q.strip():
-        needle = f"%{q.strip().casefold()}%"
-        clauses.append(
-            "(CASEFOLD(COALESCE(c.summary, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.why_it_matters, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.title, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.source, '')) LIKE ? OR "
-            "CASEFOLD(COALESCE(c.url, '')) LIKE ? OR "
-            "CASEFOLD(rer.event_title_snapshot) LIKE ? OR "
-            "CASEFOLD(COALESCE(rer.event_id, '')) LIKE ?)"
-        )
-        params.extend([needle, needle, needle, needle, needle, needle, needle])
+        needle=f"%{q.strip().casefold()}%"; clauses.append("(CASEFOLD(COALESCE(c.summary, '')) LIKE ? OR CASEFOLD(COALESCE(c.why_it_matters, '')) LIKE ? OR CASEFOLD(COALESCE(c.title, '')) LIKE ? OR CASEFOLD(COALESCE(c.source, '')) LIKE ? OR CASEFOLD(COALESCE(c.url, '')) LIKE ? OR CASEFOLD(rer.event_title_snapshot) LIKE ? OR CASEFOLD(COALESCE(rer.event_id, '')) LIKE ?)"); params.extend([needle]*7)
+    where_sql="WHERE "+" AND ".join(clauses) if clauses else ""; od="ASC" if sort=="oldest" else "DESC"
+    rows=conn.execute(f"""SELECT c.candidate_id,c.refresh_event_result_id,rer.refresh_id,rer.event_id,rer.event_title_snapshot,c.ordinal,c.direction,c.strength,c.relevance,c.credibility,c.title,c.source,c.url,c.published_at,c.summary,c.why_it_matters,c.duplicate_risk,c.freshness,c.validation_state,c.rejection_reason,c.created_at,d.decision_id,d.decision_type,d.selected_probability,d.decided_at,p.promotion_action,p.evidence_id AS promoted_evidence_id,p.promoted_at FROM refresh_candidate_evidence c JOIN refresh_event_results rer ON rer.refresh_event_result_id=c.refresh_event_result_id LEFT JOIN refresh_user_decisions d ON d.refresh_event_result_id=c.refresh_event_result_id LEFT JOIN refresh_candidate_promotions p ON p.candidate_id=c.candidate_id {where_sql} ORDER BY c.created_at {od},c.candidate_id {od}""",params).fetchall()
+    total=conn.execute("SELECT COUNT(*) AS n FROM refresh_candidate_evidence").fetchone()["n"]
+    items=[{"candidate_id":r["candidate_id"],"refresh_event_result_id":r["refresh_event_result_id"],"refresh_id":r["refresh_id"],"event_id":r["event_id"],"event_title":r["event_title_snapshot"],"ordinal":r["ordinal"],"direction":r["direction"],"strength":r["strength"],"relevance":r["relevance"],"credibility":r["credibility"],"title":r["title"],"source":r["source"],"url":r["url"],"published_at":r["published_at"],"summary":r["summary"],"why_it_matters":r["why_it_matters"],"duplicate_risk":r["duplicate_risk"],"freshness":r["freshness"],"validation_state":r["validation_state"],"rejection_reason":r["rejection_reason"],"created_at":r["created_at"],"decision_id":r["decision_id"],"decision_type":r["decision_type"],"selected_probability":r["selected_probability"],"decided_at":r["decided_at"],"promotion_action":r["promotion_action"],"evidence_id":r["promoted_evidence_id"],"promoted_at":r["promoted_at"]} for r in rows]
+    return {"items":items,"total":int(total),"filtered_total":len(items)}
 
-    where_sql = "WHERE " + " AND ".join(clauses) if clauses else ""
-    order_direction = "ASC" if sort == "oldest" else "DESC"
-    rows = conn.execute(
-        f"""
-        SELECT
-            c.candidate_id,
-            c.refresh_event_result_id,
-            rer.refresh_id,
-            rer.event_id,
-            rer.event_title_snapshot,
-            c.ordinal,
-            c.direction,
-            c.strength,
-            c.relevance,
-            c.credibility,
-            c.title,
-            c.source,
-            c.url,
-            c.published_at,
-            c.summary,
-            c.why_it_matters,
-            c.duplicate_risk,
-            c.freshness,
-            c.validation_state,
-            c.rejection_reason,
-            c.created_at,
-            d.decision_id,
-            d.decision_type,
-            d.selected_probability,
-            d.decided_at,
-            p.promotion_action,
-            p.evidence_id AS promoted_evidence_id,
-            p.promoted_at
-        FROM refresh_candidate_evidence c
-        JOIN refresh_event_results rer
-          ON rer.refresh_event_result_id = c.refresh_event_result_id
-        LEFT JOIN refresh_user_decisions d
-          ON d.refresh_event_result_id = c.refresh_event_result_id
-        LEFT JOIN refresh_candidate_promotions p
-          ON p.candidate_id = c.candidate_id
-        {where_sql}
-        ORDER BY c.created_at {order_direction}, c.candidate_id {order_direction}
-        """,
-        params,
-    ).fetchall()
 
-    total = conn.execute(
-        "SELECT COUNT(*) AS n FROM refresh_candidate_evidence"
-    ).fetchone()["n"]
-    items = [
-        {
-            "candidate_id": row["candidate_id"],
-            "refresh_event_result_id": row["refresh_event_result_id"],
-            "refresh_id": row["refresh_id"],
-            "event_id": row["event_id"],
-            "event_title": row["event_title_snapshot"],
-            "ordinal": row["ordinal"],
-            "direction": row["direction"],
-            "strength": row["strength"],
-            "relevance": row["relevance"],
-            "credibility": row["credibility"],
-            "title": row["title"],
-            "source": row["source"],
-            "url": row["url"],
-            "published_at": row["published_at"],
-            "summary": row["summary"],
-            "why_it_matters": row["why_it_matters"],
-            "duplicate_risk": row["duplicate_risk"],
-            "freshness": row["freshness"],
-            "validation_state": row["validation_state"],
-            "rejection_reason": row["rejection_reason"],
-            "created_at": row["created_at"],
-            "decision_id": row["decision_id"],
-            "decision_type": row["decision_type"],
-            "selected_probability": row["selected_probability"],
-            "decided_at": row["decided_at"],
-            "promotion_action": row["promotion_action"],
-            "evidence_id": row["promoted_evidence_id"],
-            "promoted_at": row["promoted_at"],
-        }
-        for row in rows
-    ]
-    return {"items": items, "total": int(total), "filtered_total": len(items)}
+def get_candidate_assessment_recommendation(conn: sqlite3.Connection, candidate_id: int) -> dict[str, Any] | None:
+    row = conn.execute("""
+        SELECT * FROM candidate_assessment_recommendations
+        WHERE candidate_id = ?
+        ORDER BY created_at DESC, candidate_assessment_recommendation_id DESC
+        LIMIT 1
+    """, (candidate_id,)).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    result["category_transition"] = bool(result["category_transition"])
+    return result
