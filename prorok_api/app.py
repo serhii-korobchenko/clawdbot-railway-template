@@ -24,6 +24,7 @@ EvidenceActivityWindowQuery = Literal["7d", "30d", "all"]
 CandidateDirectionQuery = Literal["indicator", "counterindicator"]
 EvidenceStrengthQuery = Literal["weak", "medium", "strong"]
 EvidenceSortQuery = Literal["newest", "oldest"]
+ProrokAppStateQuery = Literal["marked", "unmarked"]
 CandidateValidationStateQuery = Literal["legacy_unvalidated", "accepted", "rejected_source_policy", "rejected_date_conflict", "rejected_invalid_metadata"]
 
 
@@ -47,8 +48,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         with readonly_connection(resolved_settings.db_path) as conn: return list_events(conn, status=status, q=q)
 
     @app.get("/api/v1/evidence", response_model=EvidenceListResponse, dependencies=[Depends(require_api_token)])
-    def evidence_list(event_id: str | None = Query(default=None, max_length=200), direction: EvidenceDirectionQuery | None = Query(default=None), strength: EvidenceStrengthQuery | None = Query(default=None), source: str | None = Query(default=None, max_length=300), q: str | None = Query(default=None, max_length=300), sort: EvidenceSortQuery = Query(default="newest")):
-        with readonly_connection(resolved_settings.db_path) as conn: return list_evidence(conn,event_id=event_id,direction=direction,strength=strength,source=source,q=q,sort=sort)
+    def evidence_list(event_id: str | None = Query(default=None, max_length=200), direction: EvidenceDirectionQuery | None = Query(default=None), strength: EvidenceStrengthQuery | None = Query(default=None), source: str | None = Query(default=None, max_length=300), q: str | None = Query(default=None, max_length=300), sort: EvidenceSortQuery = Query(default="newest"), prorok_app: ProrokAppStateQuery | None = Query(default=None)):
+        with readonly_connection(resolved_settings.db_path) as conn: return list_evidence(conn,event_id=event_id,direction=direction,strength=strength,source=source,q=q,sort=sort,prorok_app=prorok_app)
 
     @app.get("/api/v1/evidence/activity", response_model=EvidenceActivityResponse, dependencies=[Depends(require_api_token)])
     def evidence_activity_summary(status: EventStatusQuery = Query(default="active"), window: EvidenceActivityWindowQuery = Query(default="7d")):
@@ -60,9 +61,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     @app.get("/api/v1/evidence/candidates/{candidate_id}/recommendation", response_model=CandidateAssessmentRecommendationResponse, dependencies=[Depends(require_api_token)])
     def candidate_assessment_recommendation(candidate_id: int):
-        with readonly_connection(resolved_settings.db_path) as conn:
-            result = get_candidate_assessment_recommendation(conn, candidate_id)
-        if result is None: raise HTTPException(status_code=404, detail="Candidate recommendation not found")
+        with readonly_connection(resolved_settings.db_path) as conn: result=get_candidate_assessment_recommendation(conn,candidate_id)
+        if result is None: raise HTTPException(status_code=404,detail="Candidate recommendation not found")
         return result
 
     @app.get("/api/v1/refresh/latest", response_model=LatestRefreshResponse, dependencies=[Depends(require_api_token)])
