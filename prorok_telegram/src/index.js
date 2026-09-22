@@ -24,6 +24,7 @@ const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/proro
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const CANDIDATE_REVIEW_CLI = "prorok/prorok_candidate_review_cli.py";
+const PROROK_APP_CLI = process.env.PROROK_APP_CLI || "/app/prorok/prorok_app_tracking_cli.py";
 const execFileAsync = promisify(execFile);
 const CUSTOM_PROBABILITY_VALUES = [
   0, 5,
@@ -744,6 +745,31 @@ async function runStatusCli(eventId, fromStatus, toStatus, actorSnapshot) {
   );
 }
 
+async function runProrokAppShow(evidenceId) {
+  const { stdout } = await execFileAsync(
+    PYTHON_BIN,
+    [PROROK_APP_CLI, "--db", PROROK_DB_PATH, "show", String(evidenceId)],
+    { timeout: 20000, maxBuffer: 64 * 1024, env: process.env },
+  );
+  return parseCliKeyValues(stdout);
+}
+
+async function runProrokAppSet(evidenceId, state, actorSnapshot) {
+  const args = [
+    PROROK_APP_CLI, "--db", PROROK_DB_PATH,
+    "set", String(evidenceId),
+    "--state", state,
+    "--source", "telegram",
+  ];
+  if (actorSnapshot) args.push("--actor", String(actorSnapshot));
+
+  const { stdout } = await execFileAsync(
+    PYTHON_BIN, args,
+    { timeout: 20000, maxBuffer: 64 * 1024, env: process.env },
+  );
+  return parseCliKeyValues(stdout);
+}
+
 async function runDeleteCli(command, targetId, actorSnapshot) {
   return await execFileAsync(
     PYTHON_BIN,
@@ -1347,6 +1373,26 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
   const source = item.source || {};
   const sourceLabel = source.title || source.domain || source.url || "невідоме джерело";
 
+  let prorokApp;
+  try {
+    prorokApp = await runProrokAppShow(item.evidence_id);
+  } catch (error) {
+    return {
+      title: "PROROK_APP · Стан недоступний",
+      tone: "neutral",
+      blocks: [
+        textBlock(decisionErrorText(error)),
+        buttonsBlock([
+          button("◀️ До evidence", `evidence:${safeFilter}:${safePage}`),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  }
+
+  const prorokAppState =
+    prorokApp.state === "marked" ? "marked" : "unmarked";
+
   return {
     title: `🧾 Evidence #${item.evidence_id}`,
     tone: "neutral",
@@ -1359,6 +1405,7 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
           `Relevance: ${item.relevance ?? "—"}`,
           `Credibility: ${item.credibility ?? "—"}`,
           `Створено: ${item.created_at || "—"}`,
+          `PROROK_APP: ${prorokAppState === "marked" ? "✅ внесено" : "⬜ не внесено"}`,
           "",
           `Джерело: ${shortText(sourceLabel, 300)}`,
           source.url ? `URL: ${source.url}` : null,
@@ -1368,6 +1415,13 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
       ),
       buttonsBlock([
         ...(event.current_assessment?.assessment_id ? [button(`🤖 Отримати рекомендацію`, `evidence-rec:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`, "primary"), button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`)] : []),
+        button(
+          prorokAppState === "marked"
+            ? "↩️ Зняти позначку PROROK_APP"
+            : "📤 Внести до PROROK_APP",
+          `prorok-app:${token}:${item.evidence_id}:${prorokAppState === "marked" ? "unmarked" : "marked"}:${safeFilter}:${safePage}`,
+          prorokAppState === "marked" ? undefined : "success",
+        ),
         button("↗️ Відкрити подію", `event-any:${token}`),
         button(
           `🗑 Видалити #${item.evidence_id}`,
@@ -1382,6 +1436,80 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
+}
+
+function parseProrokAppRoute(payload) {
+  const raw = payload.slice("prorok-app:".length);
+  const [token, rawEvidenceId, state, filter, rawPage, ...extra] = raw.split(":");
+
+  if (
+    !token ||
+    !/^\d+$/.test(rawEvidenceId || "") ||
+    !["marked", "unmarked"].includes(state) ||
+    !["all", "indicator", "counterindicator"].includes(filter) ||
+    !/^\d+$/.test(rawPage || "") ||
+    extra.length
+  ) {
+    throw new Error("Invalid PROROK_APP callback payload");
+  }
+
+  return {
+    token,
+    evidenceId: Number.parseInt(rawEvidenceId, 10),
+    state,
+    filter,
+    page: Number.parseInt(rawPage, 10),
+  };
+}
+
+async function appliedProrokAppPresentation(eventId, evidenceId, state, filter, page, ctx) {
+  const token = eventToken(eventId);
+
+  try {
+    const result = await runProrokAppSet(
+      evidenceId,
+      state,
+      telegramActorSnapshot(ctx),
+    );
+
+    return {
+      title: state === "marked"
+        ? "✅ PROROK_APP · Evidence внесено"
+        : "↩️ PROROK_APP · Позначку знято",
+      tone: "neutral",
+      blocks: [
+        textBlock([
+          `Evidence #${evidenceId}`,
+          `PROROK_APP: ${state === "marked" ? "✅ внесено" : "⬜ не внесено"}`,
+          result.changed === "false"
+            ? "Стан уже був таким — нового audit-запису не створено."
+            : null,
+        ].filter(Boolean).join("\n")),
+        buttonsBlock([
+          button(
+            "🧾 Повернутися до Evidence",
+            `evidence-detail:${token}:${evidenceId}:${filter}:${page}`,
+            "primary",
+          ),
+          button("◀️ До події", `event-any:${token}`),
+        ]),
+      ],
+    };
+  } catch (error) {
+    return {
+      title: "PROROK_APP · Стан не змінено",
+      tone: "neutral",
+      blocks: [
+        textBlock(decisionErrorText(error)),
+        buttonsBlock([
+          button(
+            "🧾 Повернутися до Evidence",
+            `evidence-detail:${token}:${evidenceId}:${filter}:${page}`,
+          ),
+        ]),
+      ],
+    };
+  }
 }
 
 async function globalEvidencePresentation(filter = "all", page = 0) {
@@ -2095,6 +2223,13 @@ async function renderPayload(payload, ctx = null) {
     const r=parseEvidenceAssessmentRoute(payload,"evidence-assess:",false);
     const eventId=await resolveEventId(r.token,{activeOnly:true});
     return await evidenceAssessmentChoicePresentation(eventId,r.evidenceId,r.baselineAssessmentId);
+  }
+  if (payload.startsWith("prorok-app:")) {
+    const { token, evidenceId, state, filter, page } = parseProrokAppRoute(payload);
+    const eventId = await resolveEventId(token);
+    return await appliedProrokAppPresentation(
+      eventId, evidenceId, state, filter, page, ctx,
+    );
   }
   if (payload.startsWith("evidence-detail:")) {
     const { token, evidenceId, filter, page } = parseGlobalEvidenceDetailRoute(payload);
