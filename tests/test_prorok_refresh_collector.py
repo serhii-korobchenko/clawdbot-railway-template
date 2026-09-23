@@ -885,17 +885,22 @@ def test_nested_openclaw_message_shape_is_supported(tmp_path: Path) -> None:
 
 
 
+
 def test_v4_apply_success_contract_includes_quarantine_rows() -> None:
     """Guard the versioned collector against base.apply_success signature drift."""
     import ast
-    import inspect
+    from pathlib import Path
 
-    import prorok_refresh_collector_v4 as v4
-
-    tree = ast.parse(inspect.getsource(v4.collect_one_v4))
+    source = Path("prorok/prorok_refresh_collector_v4.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "collect_one_v4"
+    ]
+    assert len(functions) == 1
     calls = [
         node
-        for node in ast.walk(tree)
+        for node in ast.walk(functions[0])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "apply_success"
