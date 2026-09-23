@@ -1350,7 +1350,8 @@ async function collectGlobalEvidence() {
 }
 
 async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "all", page = 0) {
-  const { event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const { data, event, item } = await loadEvidenceForDeletion(eventId, evidenceId);
+  const currentAssessment = data.current_assessment;
   const token = eventToken(event.event_id);
   const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
   const safePage = Math.max(Number(page) || 0, 0);
@@ -1414,7 +1415,7 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
         ].filter(Boolean).join("\n"),
       ),
       buttonsBlock([
-        ...(event.current_assessment?.assessment_id ? [button(`🤖 Отримати рекомендацію`, `evidence-rec:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`, "primary"), button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${event.current_assessment.assessment_id}`)] : []),
+        ...(currentAssessment?.assessment_id ? [button(`🤖 Отримати рекомендацію`, `evidence-rec:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`, "primary"), button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`)] : []),
         button(
           prorokAppState === "marked"
             ? "↩️ Зняти позначку PROROK_APP"
