@@ -109,3 +109,39 @@ def test_v13_ddl_statements_rollback_atomically(tmp_path):
     assert table is None
     assert indexes == []
     c.close()
+
+
+def test_persist_report_keeps_evidence_snapshot_and_live_id(tmp_path):
+    from prorok_evidence_recommendation_cli import RecommendationContext, persist_report
+
+    db=tmp_path/"persist.sqlite3"; conn=sqlite3.connect(db); conn.row_factory=sqlite3.Row
+    conn.executescript("""
+    CREATE TABLE assessments(
+      assessment_id INTEGER PRIMARY KEY,event_id TEXT,assessed_at TEXT,
+      probability_percent INTEGER,confidence TEXT,rationale TEXT);
+    INSERT INTO assessments VALUES(12,'event_a','2026-09-23T00:00:00Z',15,'medium','baseline');
+    CREATE TABLE evidence_assessment_recommendations(
+      evidence_assessment_recommendation_id INTEGER PRIMARY KEY,
+      event_id_snapshot TEXT NOT NULL,evidence_id_snapshot INTEGER NOT NULL,evidence_id INTEGER,
+      baseline_assessment_id INTEGER NOT NULL,baseline_probability INTEGER NOT NULL,
+      recommended_probability INTEGER NOT NULL,probability_delta INTEGER NOT NULL,
+      recommended_band TEXT NOT NULL,recommended_label TEXT NOT NULL,
+      recommendation_confidence TEXT NOT NULL,change_from_baseline TEXT NOT NULL,
+      net_evidence_direction TEXT NOT NULL,net_evidence_impact TEXT NOT NULL,
+      baseline_incorporation TEXT NOT NULL,category_transition INTEGER NOT NULL,
+      recommendation_rationale TEXT NOT NULL,delta_justification TEXT NOT NULL,
+      methodology_version TEXT NOT NULL,parser_version TEXT NOT NULL,agent_id TEXT,model_used TEXT,
+      run_id INTEGER,source_run_key TEXT,status TEXT NOT NULL);
+    """)
+    ctx=RecommendationContext(
+      event_id="event_a",event_title="A",question="Q",forecast_horizon="H",decision_criteria="D",
+      evidence_id=8,evidence_direction="indicator",evidence_strength="medium",
+      evidence_relevance="high",evidence_credibility="high",evidence_summary="signal",
+      baseline_assessment_id=12,baseline_probability=15,baseline_confidence="medium",
+      baseline_rationale="baseline")
+    rid=persist_report(conn,ctx,payload())
+    row=conn.execute(
+      "SELECT evidence_id_snapshot,evidence_id FROM evidence_assessment_recommendations WHERE evidence_assessment_recommendation_id=?",
+      (rid,)).fetchone()
+    assert dict(row)=={"evidence_id_snapshot":8,"evidence_id":8}
+    conn.close()
