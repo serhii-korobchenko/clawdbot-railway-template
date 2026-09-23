@@ -8,6 +8,9 @@ export function pendingCandidates(items) {
       item.candidate_id !== null &&
       item.candidate_id !== undefined &&
       !item.decision_type &&
+      !item.review_decision_type &&
+      !item.promotion_action &&
+      !item.evidence_id &&
       String(item.validation_state || "accepted") === "accepted",
   );
 }
