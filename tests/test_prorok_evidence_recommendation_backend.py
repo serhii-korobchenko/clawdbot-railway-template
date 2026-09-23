@@ -26,6 +26,8 @@ def make_db(path: Path):
     """)
     for statement in RECOMMENDATIONS_DDL.split(";"):
         if statement.strip(): c.execute(statement)
+    c.execute("ALTER TABLE evidence_assessment_recommendations ADD COLUMN evidence_id_snapshot INTEGER")
+    c.execute("UPDATE evidence_assessment_recommendations SET evidence_id_snapshot=evidence_id WHERE evidence_id_snapshot IS NULL")
     c.commit(); return c
 
 def report(**kw):
