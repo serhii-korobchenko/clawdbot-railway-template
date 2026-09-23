@@ -890,7 +890,7 @@ def test_v4_apply_success_contract_includes_quarantine_rows() -> None:
     import ast
     import inspect
 
-    from prorok import prorok_refresh_collector_v4 as v4
+    import prorok_refresh_collector_v4 as v4
 
     tree = ast.parse(inspect.getsource(v4.collect_one_v4))
     calls = [
