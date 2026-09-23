@@ -255,6 +255,10 @@ def collect_one_v4(
             expected_baseline_probability=row["baseline_probability"],
         )
         candidate_validation = base.validate_candidates(conn, row, parsed)
+        quarantine_rows = base.aggregate_validated_candidate_rows(
+            parsed,
+            candidate_validation,
+        )
     except RefreshParseError as exc:
         with conn:
             base.mark_failure(
@@ -338,6 +342,7 @@ def collect_one_v4(
                 transcript,
                 transcript_sha256,
                 parsed,
+                quarantine_rows,
                 candidate_validation,
             )
             update_search_quality_audit(
