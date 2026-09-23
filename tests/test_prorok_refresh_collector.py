@@ -884,19 +884,22 @@ def test_nested_openclaw_message_shape_is_supported(tmp_path: Path) -> None:
     assert result["job_state"] == "completed"
 
 
-def test_v4_apply_success_contract_includes_quarantine_rows(monkeypatch) -> None:
+
+def test_v4_apply_success_contract_includes_quarantine_rows() -> None:
     """Guard the versioned collector against base.apply_success signature drift."""
-    from prorok import prorok_refresh_collector as base
+    import ast
+    import inspect
+
     from prorok import prorok_refresh_collector_v4 as v4
 
-    captured = {}
-
-    monkeypatch.setattr(base, "aggregate_validated_candidate_rows", lambda parsed, validation: ["q"])
-    monkeypatch.setattr(base, "apply_success", lambda *args: captured.setdefault("args", args))
-
-    # Static compatibility assertion: v4 must build quarantine_rows and pass it
-    # immediately before candidate_validation to base.apply_success.
-    import inspect
-    source = inspect.getsource(v4.collect_one_v4)
-    assert "quarantine_rows = base.aggregate_validated_candidate_rows(" in source
-    assert "parsed,\\n                quarantine_rows,\\n                candidate_validation," in source
+    tree = ast.parse(inspect.getsource(v4.collect_one_v4))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "apply_success"
+    ]
+    assert len(calls) == 1
+    names = [arg.id for arg in calls[0].args if isinstance(arg, ast.Name)]
+    assert names[-3:] == ["parsed", "quarantine_rows", "candidate_validation"]
