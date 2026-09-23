@@ -334,15 +334,15 @@ def persist_report(
         ensure_baseline_current(conn, ctx)
         recommendation_id = conn.execute(
             """INSERT INTO evidence_assessment_recommendations(
-                event_id_snapshot,evidence_id,baseline_assessment_id,baseline_probability,
+                event_id_snapshot,evidence_id_snapshot,evidence_id,baseline_assessment_id,baseline_probability,
                 recommended_probability,probability_delta,recommended_band,recommended_label,
                 recommendation_confidence,change_from_baseline,net_evidence_direction,
                 net_evidence_impact,baseline_incorporation,category_transition,
                 recommendation_rationale,delta_justification,methodology_version,parser_version,
                 agent_id,model_used,run_id,source_run_key,status
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'ready')""",
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'ready')""",
             (
-                ctx.event_id,ctx.evidence_id,ctx.baseline_assessment_id,ctx.baseline_probability,
+                ctx.event_id,ctx.evidence_id,ctx.evidence_id,ctx.baseline_assessment_id,ctx.baseline_probability,
                 parsed.recommended_probability,parsed.probability_delta,parsed.recommended_band,
                 parsed.recommended_label,parsed.recommendation_confidence,parsed.change_from_baseline,
                 parsed.net_evidence_direction,parsed.net_evidence_impact,parsed.baseline_incorporation,
