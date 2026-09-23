@@ -1414,8 +1414,11 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
           source.domain ? `Домен: ${source.domain}` : null,
         ].filter(Boolean).join("\n"),
       ),
+      ...(currentAssessment?.assessment_id ? [
+        buttonsBlock([button(`🤖 Отримати рекомендацію`, `evidence-rec:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`, "primary")]),
+        buttonsBlock([button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`)]),
+      ] : []),
       buttonsBlock([
-        ...(currentAssessment?.assessment_id ? [button(`🤖 Отримати рекомендацію`, `evidence-rec:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`, "primary"), button(`📊 #${item.evidence_id} · Переоцінити`, `evidence-assess:${token}:${item.evidence_id}:${currentAssessment.assessment_id}`)] : []),
         button(
           prorokAppState === "marked"
             ? "↩️ Зняти позначку PROROK_APP"
@@ -1424,6 +1427,8 @@ async function globalEvidenceDetailPresentation(eventId, evidenceId, filter = "a
           prorokAppState === "marked" ? undefined : "success",
         ),
         button("↗️ Відкрити подію", `event-any:${token}`),
+      ]),
+      buttonsBlock([
         button(
           `🗑 Видалити #${item.evidence_id}`,
           `delete-evidence:${token}:${item.evidence_id}`,
