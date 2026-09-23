@@ -123,6 +123,9 @@ class CandidateEvidenceDTO(BaseModel):
     decision_type: Literal["accept_recommendation", "custom_probability", "keep_current"] | None
     selected_probability: int | None
     decided_at: str | None
+    candidate_review_decision_id: int | None
+    review_decision_type: Literal["accept", "reject"] | None
+    review_decided_at: str | None
     promotion_action: Literal["inserted", "reused"] | None
     evidence_id: int | None
     promoted_at: str | None
