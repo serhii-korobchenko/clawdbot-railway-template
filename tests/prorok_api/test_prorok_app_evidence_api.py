@@ -89,6 +89,7 @@ def test_prorok_app_invalid_filter_is_422(client, auth_headers, db_path):
 def test_official_evidence_is_not_duplicated_by_reused_candidate_promotion(
     client, auth_headers, db_path
 ):
+    _install_v17_table(db_path)
     conn = sqlite3.connect(db_path)
     conn.execute(
         """INSERT INTO refresh_event_results(
