@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
@@ -25,6 +26,7 @@ const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/pro
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const CANDIDATE_REVIEW_CLI = "prorok/prorok_candidate_review_cli.py";
 const PROROK_APP_CLI = process.env.PROROK_APP_CLI || "/app/prorok/prorok_app_tracking_cli.py";
+const TRAJECTORY_EXPORT_CLI = process.env.PROROK_TRAJECTORY_EXPORT_CLI || "/app/prorok/prorok_trajectory_export.py";
 const execFileAsync = promisify(execFile);
 const CUSTOM_PROBABILITY_VALUES = [
   0, 5,
@@ -74,6 +76,7 @@ function mainPresentation() {
       ]),
       buttonsBlock([
         button("🔄 Останнє оновлення", "refresh"),
+        button("📋 Логи", "logs", "primary"),
       ]),
       buttonsBlock([
         button("🗂 Архів", "archive"),
@@ -2173,6 +2176,30 @@ async function appliedCandidateReviewPresentation(candidateId, recommendationId,
   }
 }
 
+async function sendLatestLogs(ctx, api) {
+  const { stdout } = await execFileAsync(
+    PYTHON_BIN,
+    [TRAJECTORY_EXPORT_CLI, "--latest"],
+    { maxBuffer: 1024 * 1024 },
+  );
+  const result = JSON.parse(stdout);
+  const archivePath = String(result.archive_path || "");
+  if (!archivePath) throw new Error("trajectory export did not return archive_path");
+
+  const adapter = await api.runtime.channel.outbound.loadAdapter("telegram");
+  if (!adapter?.sendMedia) throw new Error("Telegram media delivery is unavailable");
+
+  await adapter.sendMedia({
+    cfg: api.config,
+    to: String(ctx.callback.chatId),
+    text: `PROROK logs · refresh #${result.refresh_id} · ${result.event_id}`,
+    mediaUrl: archivePath,
+    mediaLocalRoots: [path.dirname(archivePath)],
+    threadId: ctx.threadId,
+    accountId: ctx.accountId,
+  });
+}
+
 async function renderPayload(payload, ctx = null) {
   if (!payload || payload === "home") return mainPresentation();
   if (payload === "events") return await eventsPresentation();
@@ -2342,6 +2369,7 @@ async function renderPayload(payload, ctx = null) {
     return await eventPresentation(eventId);
   }
   if (payload === "refresh-run") return await manualRefreshPresentation();
+  if (payload === "logs") return mainPresentation();
   if (payload === "refresh") return await latestRefreshPresentation();
   if (payload === "archive") return await archivePresentation(0);
   if (payload.startsWith("archive:")) {
@@ -2383,6 +2411,11 @@ export default definePluginEntry({
         }
 
         try {
+          if (ctx.callback.payload === "logs") {
+            await sendLatestLogs(ctx, api);
+            await ctx.respond.reply({ text: "📋 Логи надіслано файлом." });
+            return { handled: true };
+          }
           const presentation = await renderPayload(ctx.callback.payload, ctx);
           const text = presentation.title || "PROROK";
           const buttons = presentation.blocks
