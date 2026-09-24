@@ -191,7 +191,7 @@
           const point = points.find((p) => p.refresh_id === id) || {};
           const date = point.started_at ? new Date(point.started_at) : null;
           const dateLabel = date && !Number.isNaN(date.getTime())
-            ? date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })
+            ? date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" })
             : "—";
           return `${dateLabel} · #${id}`;
         }),
