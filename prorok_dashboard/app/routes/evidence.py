@@ -71,13 +71,19 @@ async def evidence_page(
                     items = [
                         item for item in items
                         if item.get("validation_state") == "accepted"
-                        and not item.get("candidate_review_decision_id")
+                        and not item.get("decision_type")
+                        and not item.get("review_decision_type")
+                        and not item.get("promotion_action")
+                        and not item.get("evidence_id")
                     ]
                 else:
                     items = [
                         item for item in items
                         if item.get("validation_state") != "accepted"
-                        or bool(item.get("candidate_review_decision_id"))
+                        or bool(item.get("decision_type"))
+                        or bool(item.get("review_decision_type"))
+                        or bool(item.get("promotion_action"))
+                        or bool(item.get("evidence_id"))
                     ]
                 data = {**data, "items": items, "filtered_total": len(items)}
         else:
