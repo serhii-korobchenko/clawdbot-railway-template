@@ -11,7 +11,10 @@ import shutil
 import sys
 from pathlib import Path
 
-from prorok.prorok_logging import redact
+try:
+    from prorok.prorok_logging import redact
+except ModuleNotFoundError:
+    from prorok_logging import redact
 
 DEFAULT_DB = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_WORKSPACE = Path("/data/workspace")
