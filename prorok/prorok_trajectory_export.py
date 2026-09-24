@@ -7,6 +7,7 @@ import argparse
 import json
 import sqlite3
 import subprocess
+import shutil
 import sys
 from pathlib import Path
 
@@ -32,6 +33,27 @@ def load_result(db: Path, result_id: int) -> sqlite3.Row:
         conn.close()
     if row is None:
         raise SystemExit(f"refresh_event_result_id not found: {result_id}")
+    return row
+
+
+def load_latest_result(db: Path) -> sqlite3.Row:
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT refresh_event_result_id, refresh_id, event_id, cron_id,
+                   session_id, session_key, job_state
+            FROM refresh_event_results
+            WHERE session_key IS NOT NULL AND TRIM(session_key) <> ''
+            ORDER BY refresh_event_result_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise SystemExit("trajectory unavailable: no collected result with session_key")
     return row
 
 
@@ -77,6 +99,15 @@ def export_trajectory(
     except json.JSONDecodeError:
         payload = {"stdout": proc.stdout.strip()}
 
+    actual_output_dir = workspace / ".openclaw" / "trajectory-exports" / output_name
+    if isinstance(payload, dict) and payload.get("outputDir"):
+        actual_output_dir = Path(str(payload["outputDir"]))
+    if not actual_output_dir.is_dir():
+        raise SystemExit(f"trajectory export directory not found: {actual_output_dir}")
+
+    archive_base = export_root / output_name
+    archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=actual_output_dir))
+
     return {
         "refresh_id": int(row["refresh_id"]),
         "refresh_event_result_id": int(row["refresh_event_result_id"]),
@@ -87,13 +118,15 @@ def export_trajectory(
         "job_state": str(row["job_state"] or ""),
         "output_name": output_name,
         "export_root": str(export_root),
+        "archive_path": str(archive_path),
         "openclaw": payload,
     }
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("refresh_event_result_id", type=int)
+    parser.add_argument("refresh_event_result_id", type=int, nargs="?")
+    parser.add_argument("--latest", action="store_true")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
     parser.add_argument("--export-root", type=Path, default=DEFAULT_EXPORT_ROOT)
@@ -103,7 +136,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    row = load_result(args.db, args.refresh_event_result_id)
+    if args.latest:
+        row = load_latest_result(args.db)
+    elif args.refresh_event_result_id is not None:
+        row = load_result(args.db, args.refresh_event_result_id)
+    else:
+        raise SystemExit("provide refresh_event_result_id or --latest")
     result = export_trajectory(
         row,
         workspace=args.workspace,
