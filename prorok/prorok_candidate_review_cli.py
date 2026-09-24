@@ -63,7 +63,20 @@ def promote(c,x,review_id,run_id,now):
     if x['validation_state']!='accepted': raise CliError(f"candidate is not quarantine-accepted: validation_state={x['validation_state']}")
     if not str(x['url'] or '').strip(): raise CliError('candidate URL is required for promotion')
     if not str(x['summary'] or '').strip(): raise CliError('candidate summary is required for promotion')
-    assert_candidate_source_not_already_official(c,candidate_id=candidate_id,event_id=event_id,raw_url=str(x['url']).strip())
+    raw_url=str(x['url']).strip()
+    try:
+        assert_candidate_source_not_already_official(c,candidate_id=candidate_id,event_id=event_id,raw_url=raw_url)
+    except CliError as exc:
+        marker="candidate source already exists as official evidence for this event:"
+        if marker not in str(exc): raise
+        from prorok_refresh_decision_cli import canonicalize_url
+        _canonical_url,canonical_hash,_domain=canonicalize_url(raw_url)
+        existing=fetch_one(c,"""SELECT e.evidence_id,e.source_id FROM evidence_items e JOIN sources s ON s.source_id=e.source_id WHERE e.event_id=? AND s.canonical_url_hash=? ORDER BY e.evidence_id LIMIT 1""",(event_id,canonical_hash))
+        if existing is None: raise
+        evidence_id=int(existing['evidence_id'])
+        c.execute("""INSERT INTO refresh_candidate_promotions(candidate_id,refresh_event_result_id,decision_id,candidate_review_decision_id,evidence_id,run_id,promotion_action,promoted_at)
+          VALUES(?,?,NULL,?,?,?,?,?)""",(candidate_id,int(x['refresh_event_result_id']),review_id,evidence_id,run_id,'reused',now))
+        return evidence_id,'reused',False
     source_id,new_source=upsert_candidate_source(c,x,now=now)
     cur=c.execute("""INSERT OR IGNORE INTO evidence_items(event_id,source_id,run_id,direction,strength,summary,relevance,credibility,created_at)
       VALUES(?,?,?,?,?,?,?,?,?)""",(event_id,source_id,run_id,x['direction'],x['strength'],str(x['summary']).strip(),x['relevance'],x['credibility'],now))
