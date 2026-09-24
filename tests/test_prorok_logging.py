@@ -68,3 +68,23 @@ def test_redact_high_confidence_secrets_but_keep_diagnostic_ids():
     assert "hunter2" not in got
     assert "abc.def.ghi" not in got
     assert "sk-1234567890abcdefghijkl" not in got
+
+
+
+def test_redact_secret_fields_but_preserve_token_usage_metrics():
+    payload = {
+        "token": "secret-token",
+        "access_token": "access-secret",
+        "API_KEY": "api-secret",
+        "SECRET": "generic-secret",
+        "ADMIN_KEY": "admin-secret",
+        "token_count": 123,
+        "input_tokens": 45,
+        "output_tokens": 78,
+    }
+    result = redact(payload)
+    for key in ("token", "access_token", "API_KEY", "SECRET", "ADMIN_KEY"):
+        assert result[key] == "[REDACTED]"
+    assert result["token_count"] == 123
+    assert result["input_tokens"] == 45
+    assert result["output_tokens"] == 78
