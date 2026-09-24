@@ -98,3 +98,21 @@ def test_recommendation_must_match_candidate_and_event(tmp_path: Path) -> None:
         assert 'does not belong to this Candidate/Event' in str(exc)
     else:
         raise AssertionError('cross-event recommendation was accepted')
+
+
+def test_accept_reuses_existing_official_source_and_finalizes_candidate(tmp_path: Path) -> None:
+    db=tmp_path/'db.sqlite3'; make_db(db); m=load('prorok/prorok_candidate_review_cli.py','candidate_review_reuse')
+    c=sqlite3.connect(db)
+    canonical_url,canonical_hash,domain=m.__dict__['upsert_candidate_source'].__globals__['canonicalize_url']('https://example.com/a')
+    c.execute("INSERT INTO sources(source_id,url,canonical_url,canonical_url_hash,domain) VALUES(16,?,?,?,?)",('https://example.com/a',canonical_url,canonical_hash,domain))
+    c.execute("INSERT INTO evidence_items(evidence_id,event_id,source_id,run_id,direction,strength,summary,relevance,credibility,created_at) VALUES(16,'event-a',16,NULL,'indicator','medium','Existing official evidence','high','high','2026-09-01')")
+    c.commit(); c.close()
+
+    assert m.cmd_decide(args(db,7,'accept'))==0
+
+    c=sqlite3.connect(db)
+    assert c.execute("SELECT decision_type FROM candidate_review_decisions WHERE candidate_id=7").fetchone()==('accept',)
+    assert c.execute("SELECT evidence_id,promotion_action FROM refresh_candidate_promotions WHERE candidate_id=7").fetchone()==(16,'reused')
+    assert c.execute("SELECT COUNT(*) FROM evidence_items").fetchone()[0]==1
+    assert c.execute('PRAGMA foreign_key_check').fetchall()==[]
+    c.close()
