@@ -186,7 +186,17 @@
 
     new Chart(canvas, {
       type: "line",
-      data: { labels: labels.map((id) => `#${id}`), datasets },
+      data: {
+        labels: labels.map((id) => {
+          const point = points.find((p) => p.refresh_id === id) || {};
+          const date = point.started_at ? new Date(point.started_at) : null;
+          const dateLabel = date && !Number.isNaN(date.getTime())
+            ? date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" })
+            : "—";
+          return `${dateLabel} · #${id}`;
+        }),
+        datasets
+      },
       options: {
         responsive: true, maintainAspectRatio: false,
         scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Кількість candidates" } } },
@@ -197,7 +207,11 @@
               const eventId = eventIds[context.datasetIndex];
               const refreshId = labels[context.dataIndex];
               const point = byKey.get(`${eventId}:${refreshId}`) || {};
-              return [`Refresh #${refreshId}`, `Час: ${point.started_at || "—"}`];
+              const date = point.started_at ? new Date(point.started_at) : null;
+              const fullDate = date && !Number.isNaN(date.getTime())
+                ? date.toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                : "—";
+              return [`Refresh #${refreshId} · ${fullDate}`];
             }
           }}
         }
