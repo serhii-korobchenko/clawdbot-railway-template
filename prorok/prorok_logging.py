@@ -18,7 +18,8 @@ DEFAULT_LOG_DIR = Path(os.getenv("PROROK_LOG_DIR", "/data/workspace/prorok/logs"
 DEFAULT_RETENTION_DAYS = 30
 
 _SECRET_KEY = re.compile(
-    r"(token|secret|password|passwd|authorization|api[_-]?key|cookie|credential)",
+    r"^(?:token|access[_-]?token|secret|password|passwd|authorization|"
+    r"api[_-]?key|admin[_-]?key|cookie|credential)$",
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+\-/]+=*")
@@ -27,7 +28,7 @@ _URL_SECRET = re.compile(
 )
 _SECRET_ASSIGNMENT = re.compile(
     r"(?i)(\b(?:token|secret|password|passwd|authorization|api[_-]?key|"
-    r"access[_-]?token|cookie|credential)\b\s*[:=]\s*)([^\s,;]+)"
+    r"admin[_-]?key|access[_-]?token|cookie|credential)\b\s*[:=]\s*)([^\s,;]+)"
 )
 _KNOWN_TOKEN = re.compile(
     r"(?i)\b(?:sk-[A-Za-z0-9_-]{16,}|tvly-[A-Za-z0-9_-]{16,}|"
