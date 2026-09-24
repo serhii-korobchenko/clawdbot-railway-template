@@ -25,6 +25,15 @@ _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+\-/]+=*")
 _URL_SECRET = re.compile(
     r"(?i)([?&](?:token|key|api_key|apikey|access_token|auth)=)[^&#\s]+"
 )
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)(\b(?:token|secret|password|passwd|authorization|api[_-]?key|"
+    r"access[_-]?token|cookie|credential)\b\s*[:=]\s*)([^\s,;]+)"
+)
+_KNOWN_TOKEN = re.compile(
+    r"(?i)\b(?:sk-[A-Za-z0-9_-]{16,}|tvly-[A-Za-z0-9_-]{16,}|"
+    r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|"
+    r"\d{8,12}:[A-Za-z0-9_-]{20,})\b"
+)
 
 
 def utc_now() -> datetime:
@@ -38,7 +47,9 @@ def utc_iso(value: datetime | None = None) -> str:
 
 def _redact_string(value: str) -> str:
     value = _BEARER.sub("Bearer [REDACTED]", value)
-    return _URL_SECRET.sub(r"\1[REDACTED]", value)
+    value = _URL_SECRET.sub(r"\1[REDACTED]", value)
+    value = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", value)
+    return _KNOWN_TOKEN.sub("[REDACTED]", value)
 
 
 def redact(value: Any, key: str = "") -> Any:
