@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from prorok_logging import write_log
+
 
 DEFAULT_DB_PATH = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_PROMPT_DIR = Path("/data/workspace/prorok/refresh_prompts")
@@ -484,6 +486,17 @@ def main(argv: list[str]) -> int:
         print(f"   updated_at: {target.updated_at or 'n/a'}")
         print(f"   at: {at_value}")
 
+        write_log(
+            "refresh.schedule_attempt",
+            component="refresh_all",
+            refresh_id=refresh_id,
+            refresh_event_result_id=child_ids.get(target.event_id),
+            event_id=target.event_id,
+            event_title=target.title,
+            at_offset=at_value,
+            agent=args.agent,
+            tools=args.tools.split(),
+        )
         proc = run_one(script, target, args, at_value)
         parsed = parse_launcher_output(proc.stdout or "")
         cron_id = parsed.get("cron_id", "")
@@ -553,6 +566,15 @@ def main(argv: list[str]) -> int:
             "thread_id": str(args.thread_id),
             "agent": args.agent,
         }
+        try:
+            write_log(
+                "refresh.schedule_result",
+                component="refresh_all",
+                level="error" if target_failed else "info",
+                **audit_record,
+            )
+        except OSError as exc:
+            print(f"   structured_log_error: {exc}", file=sys.stderr)
         try:
             append_audit_record(args.audit_log, audit_record)
             print(f"   audit_log: appended {args.audit_log}")
