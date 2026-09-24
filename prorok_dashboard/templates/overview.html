@@ -129,6 +129,44 @@
   {% endif %}
 </section>
 
+
+<section class="section-block" aria-labelledby="candidate-activity-title">
+  <div class="section-heading-row">
+    <div><p class="eyebrow">Інформаційна активність</p><h2 id="candidate-activity-title">Candidate evidence у часі</h2></div>
+  </div>
+  <form method="get" action="/" class="search-form">
+    <label>Подія
+      <select name="candidate_activity_event">
+        <option value="">Усі події</option>
+        {% for event in data.items %}
+        <option value="{{ event.event_id }}" {% if candidate_activity_event == event.event_id %}selected{% endif %}>{{ event.title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Період
+      <select name="candidate_activity_window">
+        {% for value, label in [('7d','7 днів'),('30d','30 днів'),('all','Весь час')] %}
+        <option value="{{ value }}" {% if candidate_activity_window == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Метрика
+      <select name="candidate_activity_metric">
+        <option value="accepted" {% if candidate_activity_metric == 'accepted' %}selected{% endif %}>Accepted candidates</option>
+        <option value="all" {% if candidate_activity_metric == 'all' %}selected{% endif %}>All candidates</option>
+      </select>
+    </label>
+    <button type="submit">Застосувати</button>
+  </form>
+  <p class="muted">Кожна точка — окремий refresh. Нульові значення зберігаються, якщо подію перевірено, але candidates не знайдено.</p>
+  {% if candidate_activity.points %}
+  <div class="activity-chart-wrap" style="height: 360px">
+    <div id="candidate-activity-chart-data" data-points='{{ candidate_activity.points|tojson|forceescape }}'></div>
+    <canvas id="candidate-activity-chart" aria-label="Candidate evidence по refresh"></canvas>
+  </div>
+  {% else %}<p class="empty-copy">За вибраний період даних немає.</p>{% endif %}
+</section>
+
 <nav class="status-tabs" aria-label="Фільтр статусу">
   {% set tabs = [
     (None, 'Усі', data.total),
