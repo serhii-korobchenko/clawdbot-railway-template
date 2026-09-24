@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from prorok.prorok_trajectory_export import export_trajectory, load_latest_result, load_result, safe_name
+from prorok.prorok_trajectory_export import export_trajectory, load_latest_result, load_result, normalize_session_key, safe_name
 
 
 def make_db(path: Path, session_key: str | None = "agent:prorok-refresh:cron:abc") -> None:
@@ -27,6 +27,15 @@ def make_db(path: Path, session_key: str | None = "agent:prorok-refresh:cron:abc
     )
     conn.commit()
     conn.close()
+
+
+def test_normalize_run_specific_session_key():
+    assert normalize_session_key(
+        "agent:prorok-refresh:cron:abc:run:session-123"
+    ) == "agent:prorok-refresh:cron:abc"
+    assert normalize_session_key(
+        "agent:prorok-refresh:cron:abc"
+    ) == "agent:prorok-refresh:cron:abc"
 
 
 def test_load_result_and_safe_name(tmp_path):
