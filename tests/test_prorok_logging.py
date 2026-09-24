@@ -50,3 +50,21 @@ def test_cleanup_old_logs_keeps_retention_boundary(tmp_path):
     assert not (tmp_path / "prorok-2026-08-24.jsonl").exists()
     assert (tmp_path / "prorok-2026-08-25.jsonl").exists()
     assert (tmp_path / "unrelated.jsonl").exists()
+
+
+
+def test_redact_high_confidence_secrets_but_keep_diagnostic_ids():
+    value = {
+        "text": (
+            "query=Ukraine session_id=6ec025a8-7fbe-4e37-be36-bcb5f9499c31 "
+            "api_key=TOPSECRET password: hunter2 "
+            "Bearer abc.def.ghi sk-1234567890abcdefghijkl"
+        )
+    }
+    got = redact(value)["text"]
+    assert "query=Ukraine" in got
+    assert "6ec025a8-7fbe-4e37-be36-bcb5f9499c31" in got
+    assert "TOPSECRET" not in got
+    assert "hunter2" not in got
+    assert "abc.def.ghi" not in got
+    assert "sk-1234567890abcdefghijkl" not in got
