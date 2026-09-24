@@ -57,6 +57,14 @@ def load_latest_result(db: Path) -> sqlite3.Row:
     return row
 
 
+def normalize_session_key(session_key: str) -> str:
+    """Map collector run-specific keys to the stored OpenClaw session key."""
+    marker = ":run:"
+    if marker in session_key:
+        return session_key.split(marker, 1)[0]
+    return session_key
+
+
 def safe_name(row: sqlite3.Row) -> str:
     return f"refresh-{int(row['refresh_id'])}-result-{int(row['refresh_event_result_id'])}"
 
@@ -68,11 +76,13 @@ def export_trajectory(
     export_root: Path,
     openclaw_bin: str,
 ) -> dict[str, object]:
-    session_key = str(row["session_key"] or "").strip()
-    if not session_key:
+    collected_session_key = str(row["session_key"] or "").strip()
+    if not collected_session_key:
         raise SystemExit(
             "trajectory unavailable: collector has not recorded session_key for this result"
         )
+
+    session_key = normalize_session_key(collected_session_key)
 
     export_root.mkdir(parents=True, exist_ok=True)
     output_name = safe_name(row)
@@ -115,6 +125,7 @@ def export_trajectory(
         "cron_id": str(row["cron_id"] or ""),
         "session_id": str(row["session_id"] or ""),
         "session_key": session_key,
+        "collected_session_key": collected_session_key,
         "job_state": str(row["job_state"] or ""),
         "output_name": output_name,
         "export_root": str(export_root),
