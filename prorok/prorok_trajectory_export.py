@@ -11,6 +11,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from prorok.prorok_logging import redact
+
 DEFAULT_DB = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_WORKSPACE = Path("/data/workspace")
 DEFAULT_EXPORT_ROOT = Path("/data/workspace/prorok/logs/trajectory-exports")
@@ -154,6 +156,45 @@ def export_trajectory(
 
 
 
+ALLOWED_TRAJECTORY_FILES = {
+    "artifacts.json",
+    "events.jsonl",
+    "manifest.json",
+    "metadata.json",
+    "prompts.json",
+    "session-branch.json",
+    "system-prompt.txt",
+    "tools.json",
+}
+
+
+def sanitize_trajectory_dir(directory: Path) -> None:
+    """Keep diagnostic content while redacting credential values."""
+    for path in directory.iterdir():
+        if not path.is_file():
+            continue
+        if path.name not in ALLOWED_TRAJECTORY_FILES:
+            path.unlink()
+            continue
+        if path.suffix == ".json":
+            data = json.loads(path.read_text(encoding="utf-8"))
+            path.write_text(
+                json.dumps(redact(data), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        elif path.suffix == ".jsonl":
+            rows = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    rows.append(
+                        json.dumps(redact(json.loads(line)), ensure_ascii=False, sort_keys=True)
+                    )
+            path.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+        elif path.suffix == ".txt":
+            value = path.read_text(encoding="utf-8")
+            path.write_text(str(redact(value)), encoding="utf-8")
+
+
 def export_refresh_bundle(
     refresh_id: int,
     *,
@@ -217,6 +258,7 @@ def export_refresh_bundle(
 
         target = bundle_dir / f"{int(row['refresh_event_result_id'])}-{str(row['event_id'])}"
         shutil.copytree(source, target)
+        sanitize_trajectory_dir(target)
         item.update(
             trajectory=target.name,
             session_id=str(row["session_id"] or ""),
@@ -224,8 +266,9 @@ def export_refresh_bundle(
         )
         manifest["results"].append(item)
 
+    manifest["secret_redaction"] = "applied"
     (bundle_dir / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(redact(manifest), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     archive_path = Path(
