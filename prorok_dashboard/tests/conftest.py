@@ -99,6 +99,16 @@ class FakeApiClient:
             }],
         }
 
+
+    async def get_candidate_activity(self, *, event_id=None, window="7d", metric="accepted"):
+        points = [
+            {"refresh_id": 9, "started_at": "2026-09-08T08:00:00Z", "event_id": "event-1", "event_title": "Test event", "candidate_count": 0},
+            {"refresh_id": 10, "started_at": "2026-09-09T08:00:00Z", "event_id": "event-1", "event_title": "Test event", "candidate_count": 2},
+        ]
+        if event_id:
+            points = [point for point in points if point["event_id"] == event_id]
+        return {"window": window, "metric": metric, "event_id": event_id, "generated_at": "2026-09-19T20:00:00Z", "cutoff_at": None, "points": points}
+
     async def get_latest_refresh(self):
         return {
             "refresh": {
