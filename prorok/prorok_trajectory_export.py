@@ -266,7 +266,7 @@ def export_refresh_bundle(
         )
         manifest["results"].append(item)
 
-    manifest["secret_redaction"] = "applied"
+    manifest["redaction_status"] = "applied"
     (bundle_dir / "manifest.json").write_text(
         json.dumps(redact(manifest), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
