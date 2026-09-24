@@ -2179,7 +2179,7 @@ async function appliedCandidateReviewPresentation(candidateId, recommendationId,
 async function sendLatestLogs(ctx, api) {
   const { stdout } = await execFileAsync(
     PYTHON_BIN,
-    [TRAJECTORY_EXPORT_CLI, "--latest"],
+    [TRAJECTORY_EXPORT_CLI, "--latest", "--full-refresh"],
     { maxBuffer: 1024 * 1024 },
   );
   const result = JSON.parse(stdout);
