@@ -70,6 +70,48 @@ def list_candidate_evidence(conn: sqlite3.Connection, *, event_id: str | None = 
     return {"items":items,"total":int(total),"filtered_total":len(items)}
 
 
+
+def candidate_activity_timeline(conn: sqlite3.Connection, *, event_id: str | None = None, window: str = "7d", metric: str = "accepted", now: datetime | None = None) -> dict[str, Any]:
+    if window not in _ACTIVITY_WINDOWS:
+        raise ValueError(f"Unsupported candidate activity window: {window}")
+    if metric not in {"accepted", "all"}:
+        raise ValueError(f"Unsupported candidate activity metric: {metric}")
+    generated = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    duration = _ACTIVITY_WINDOWS[window]
+    cutoff = generated - duration if duration is not None else None
+    clauses = ["rer.event_id IS NOT NULL"]
+    params: list[Any] = []
+    if event_id:
+        clauses.append("rer.event_id = ?"); params.append(event_id)
+    if cutoff is not None:
+        clauses.append("julianday(rr.started_at) >= julianday(?)"); params.append(_iso_utc(cutoff))
+    where_sql = " AND ".join(clauses)
+    rows = conn.execute(f"""
+        SELECT rr.refresh_id, rr.started_at, rer.event_id, rer.event_title_snapshot,
+               COUNT(c.candidate_id) AS all_count,
+               SUM(CASE WHEN c.validation_state = 'accepted' THEN 1 ELSE 0 END) AS accepted_count
+        FROM refresh_event_results rer
+        JOIN refresh_runs rr ON rr.refresh_id = rer.refresh_id
+        LEFT JOIN refresh_candidate_evidence c ON c.refresh_event_result_id = rer.refresh_event_result_id
+        WHERE {where_sql}
+        GROUP BY rr.refresh_id, rr.started_at, rer.event_id, rer.event_title_snapshot
+        ORDER BY rr.started_at ASC, rr.refresh_id ASC, rer.event_id ASC
+    """, params).fetchall()
+    points = [{
+        "refresh_id": int(r["refresh_id"]),
+        "started_at": r["started_at"],
+        "event_id": r["event_id"],
+        "event_title": r["event_title_snapshot"],
+        "candidate_count": int(r["accepted_count"] if metric == "accepted" else r["all_count"] or 0),
+    } for r in rows]
+    return {
+        "window": window, "metric": metric, "event_id": event_id,
+        "generated_at": _iso_utc(generated),
+        "cutoff_at": _iso_utc(cutoff) if cutoff is not None else None,
+        "points": points,
+    }
+
+
 def get_candidate_assessment_recommendation(conn: sqlite3.Connection, candidate_id: int) -> dict[str, Any] | None:
     row=conn.execute("SELECT * FROM candidate_assessment_recommendations WHERE candidate_id=? ORDER BY created_at DESC,candidate_assessment_recommendation_id DESC LIMIT 1",(candidate_id,)).fetchone()
     if row is None: return None
