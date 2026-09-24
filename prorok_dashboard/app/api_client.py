@@ -160,6 +160,12 @@ class ProrokApiClient:
         params["sort"] = sort
         return await self._get("/api/v1/evidence/candidates", params=params)
 
+    async def get_candidate_activity(self, *, event_id: str | None = None, window: str = "7d", metric: str = "accepted") -> dict[str, Any]:
+        params: dict[str, Any] = {"window": window, "metric": metric}
+        if event_id:
+            params["event_id"] = event_id
+        return await self._get("/api/v1/evidence/candidates/activity", params=params)
+
     async def get_latest_refresh(self) -> dict[str, Any]:
         return await self._get("/api/v1/refresh/latest")
 
