@@ -12,7 +12,7 @@ from .config import ApiSettings
 from .db import readonly_connection, validate_database
 from .errors import DatabaseUnavailable
 from .evidence_models import CandidateAssessmentRecommendationResponse, CandidateEvidenceListResponse, EvidenceActivityResponse, EvidenceListResponse
-from .evidence_repository import evidence_activity, get_candidate_assessment_recommendation, list_candidate_evidence, list_evidence
+from .evidence_repository import candidate_activity_timeline, evidence_activity, get_candidate_assessment_recommendation, list_candidate_evidence, list_evidence
 from .latest_refresh_models import LatestRefreshResponse
 from .latest_refresh_repository import get_latest_refresh
 from .models import EventDetailResponse, EventListResponse, LatestRecommendationResponse
@@ -21,6 +21,7 @@ from .repository import get_event_detail, get_latest_recommendation, list_events
 EventStatusQuery = Literal["active", "paused", "resolved", "archived"]
 EvidenceDirectionQuery = Literal["indicator", "counterindicator", "neutral"]
 EvidenceActivityWindowQuery = Literal["7d", "30d", "all"]
+CandidateActivityMetricQuery = Literal["accepted", "all"]
 CandidateDirectionQuery = Literal["indicator", "counterindicator"]
 EvidenceStrengthQuery = Literal["weak", "medium", "strong"]
 EvidenceSortQuery = Literal["newest", "oldest"]
@@ -54,6 +55,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     @app.get("/api/v1/evidence/activity", response_model=EvidenceActivityResponse, dependencies=[Depends(require_api_token)])
     def evidence_activity_summary(status: EventStatusQuery = Query(default="active"), window: EvidenceActivityWindowQuery = Query(default="7d")):
         with readonly_connection(resolved_settings.db_path) as conn: return evidence_activity(conn,status=status,window=window)
+
+    @app.get("/api/v1/evidence/candidates/activity", dependencies=[Depends(require_api_token)])
+    def candidate_activity(event_id: str | None = Query(default=None,max_length=200), window: EvidenceActivityWindowQuery = Query(default="7d"), metric: CandidateActivityMetricQuery = Query(default="accepted")):
+        with readonly_connection(resolved_settings.db_path) as conn: return candidate_activity_timeline(conn,event_id=event_id,window=window,metric=metric)
 
     @app.get("/api/v1/evidence/candidates", response_model=CandidateEvidenceListResponse, dependencies=[Depends(require_api_token)])
     def candidate_evidence_list(event_id: str | None = Query(default=None,max_length=200), direction: CandidateDirectionQuery | None = Query(default=None), strength: EvidenceStrengthQuery | None = Query(default=None), validation_state: CandidateValidationStateQuery | None = Query(default=None), source: str | None = Query(default=None,max_length=300), q: str | None = Query(default=None,max_length=300), sort: EvidenceSortQuery = Query(default="newest")):
