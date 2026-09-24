@@ -127,3 +127,44 @@ def test_official_evidence_is_not_duplicated_by_reused_candidate_promotion(
     assert payload["filtered_total"] == 1
     assert [item["evidence_id"] for item in payload["items"]] == [1]
     assert payload["items"][0]["assessment"]["refresh_id"] == 50
+
+
+def test_official_evidence_sort_uses_publication_date_and_nulls_last(
+    client, auth_headers, db_path
+):
+    _install_v17_table(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO sources(
+            source_id,url,canonical_url,canonical_url_hash,title,domain,published_at,
+            first_seen_at,last_seen_at,source_type,raw_metadata
+        ) VALUES(2,'https://example.com/b','https://example.com/b','hash2',
+                 'Newer source','example.com','2026-06-05T00:00:00Z',
+                 '2026-06-06T00:00:00Z','2026-06-06T00:00:00Z','web','{}')"""
+    )
+    conn.execute(
+        """INSERT INTO sources(
+            source_id,url,canonical_url,canonical_url_hash,title,domain,published_at,
+            first_seen_at,last_seen_at,source_type,raw_metadata
+        ) VALUES(3,'https://example.com/c','https://example.com/c','hash3',
+                 'Unknown date','example.com',NULL,
+                 '2026-06-07T00:00:00Z','2026-06-07T00:00:00Z','web','{}')"""
+    )
+    conn.executemany(
+        """INSERT INTO evidence_items(
+            evidence_id,event_id,source_id,run_id,direction,strength,summary,
+            relevance,credibility,created_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        [
+            (2,'active_event',2,11,'indicator','medium','Newer publication',80,90,'2026-06-01T08:00:00Z'),
+            (3,'active_event',3,11,'indicator','medium','No publication date',80,90,'2026-06-10T08:00:00Z'),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    newest = client.get("/api/v1/evidence?sort=newest", headers=auth_headers).json()["items"]
+    oldest = client.get("/api/v1/evidence?sort=oldest", headers=auth_headers).json()["items"]
+
+    assert [item["evidence_id"] for item in newest] == [2, 1, 3]
+    assert [item["evidence_id"] for item in oldest] == [1, 2, 3]
