@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import shutil
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -19,6 +20,48 @@ except ModuleNotFoundError:
 DEFAULT_DB = Path("/data/workspace/prorok/prorok.sqlite3")
 DEFAULT_WORKSPACE = Path("/data/workspace")
 DEFAULT_EXPORT_ROOT = Path("/data/workspace/prorok/logs/trajectory-exports")
+DEFAULT_RETENTION_DAYS = 30
+
+
+def cleanup_old_trajectory_artifacts(
+    *,
+    export_root: Path,
+    workspace: Path,
+    retention_days: int = DEFAULT_RETENTION_DAYS,
+    now: datetime | None = None,
+) -> int:
+    """Remove only PROROK-owned trajectory artifacts older than retention."""
+    if retention_days < 1:
+        raise ValueError("retention_days must be >= 1")
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=retention_days)
+    removed = 0
+    roots_and_patterns = [
+        (export_root, ("refresh-*-full.zip", "refresh-*-full", "refresh-*-result-*.zip")),
+        (workspace / ".openclaw" / "trajectory-exports", ("refresh-*-result-*",)),
+    ]
+    for root, patterns in roots_and_patterns:
+        if not root.exists():
+            continue
+        seen: set[Path] = set()
+        for pattern in patterns:
+            for path in root.glob(pattern):
+                if path in seen:
+                    continue
+                seen.add(path)
+                try:
+                    modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                except FileNotFoundError:
+                    continue
+                if modified >= cutoff:
+                    continue
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+                removed += 1
+    return removed
+
 
 
 def load_result(db: Path, result_id: int) -> sqlite3.Row:
@@ -109,6 +152,7 @@ def export_trajectory(
     session_key = normalize_session_key(collected_session_key)
 
     export_root.mkdir(parents=True, exist_ok=True)
+    cleanup_old_trajectory_artifacts(export_root=export_root, workspace=workspace)
     output_name = safe_name(row)
     cmd = [
         openclaw_bin,
@@ -206,6 +250,7 @@ def export_refresh_bundle(
     export_root: Path,
     openclaw_bin: str,
 ) -> dict[str, object]:
+    cleanup_old_trajectory_artifacts(export_root=export_root, workspace=workspace)
     rows = load_refresh_results(db, refresh_id)
     if not rows:
         raise SystemExit(f"refresh not found: {refresh_id}")
