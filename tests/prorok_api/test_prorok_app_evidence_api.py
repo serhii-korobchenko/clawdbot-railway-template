@@ -134,6 +134,7 @@ def test_official_evidence_sort_uses_publication_date_and_nulls_last(
 ):
     _install_v17_table(db_path)
     conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE sources SET published_at = ? WHERE source_id = 1", ("2026-06-01T00:00:00Z",))
     conn.execute(
         """INSERT INTO sources(
             source_id,url,canonical_url,canonical_url_hash,title,domain,published_at,
