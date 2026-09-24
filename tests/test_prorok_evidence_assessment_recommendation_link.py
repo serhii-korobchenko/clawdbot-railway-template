@@ -12,7 +12,7 @@ def make_db(path: Path):
     CREATE TABLE assessments(assessment_id INTEGER PRIMARY KEY,event_id TEXT,run_id INTEGER,assessed_at TEXT,probability_percent INTEGER,probability_band TEXT,probability_label TEXT,confidence TEXT,delta_from_previous INTEGER,rationale TEXT);
     CREATE TABLE evidence_items(evidence_id INTEGER PRIMARY KEY,event_id TEXT,summary TEXT);
     CREATE TABLE evidence_assessment_recommendations(evidence_assessment_recommendation_id INTEGER PRIMARY KEY,event_id_snapshot TEXT,evidence_id INTEGER,baseline_assessment_id INTEGER,baseline_probability INTEGER,status TEXT);
-    CREATE TABLE evidence_assessment_decisions(evidence_assessment_decision_id INTEGER PRIMARY KEY,event_id_snapshot TEXT,evidence_id INTEGER,baseline_assessment_id INTEGER,baseline_probability INTEGER,selected_probability INTEGER,assessment_id INTEGER,run_id INTEGER,decision_source TEXT,actor TEXT,decided_at TEXT,recommendation_id INTEGER);
+    CREATE TABLE evidence_assessment_decisions(evidence_assessment_decision_id INTEGER PRIMARY KEY,event_id_snapshot TEXT NOT NULL,evidence_id_snapshot INTEGER NOT NULL,evidence_id INTEGER,baseline_assessment_id INTEGER,baseline_probability INTEGER,selected_probability INTEGER,assessment_id INTEGER,run_id INTEGER,decision_source TEXT,actor TEXT,decided_at TEXT,recommendation_id INTEGER);
     INSERT INTO assessments VALUES(12,'event_a',NULL,'2026-09-20T00:00:00Z',15,'10-20%','Ймовірність низька','medium',NULL,'baseline');
     INSERT INTO evidence_items VALUES(8,'event_a','Official evidence');
     INSERT INTO evidence_assessment_recommendations VALUES(31,'event_a',8,12,15,'ready');
@@ -28,8 +28,8 @@ def test_accept_recommendation_links_provenance(tmp_path):
     db=tmp_path/"p.sqlite3"; make_db(db)
     r=run_cli(db,20); assert r.returncode==0, r.stderr
     c=sqlite3.connect(db)
-    row=c.execute("SELECT recommendation_id,selected_probability FROM evidence_assessment_decisions").fetchone()
-    assert row==(31,20); c.close()
+    row=c.execute("SELECT recommendation_id,selected_probability,evidence_id_snapshot,evidence_id FROM evidence_assessment_decisions").fetchone()
+    assert row==(31,20,8,8); c.close()
 
 def test_custom_probability_keeps_recommendation_link(tmp_path):
     db=tmp_path/"p.sqlite3"; make_db(db)
