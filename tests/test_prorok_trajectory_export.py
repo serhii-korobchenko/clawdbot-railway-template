@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from prorok.prorok_trajectory_export import export_trajectory, load_result, safe_name
+from prorok.prorok_trajectory_export import export_trajectory, load_latest_result, load_result, safe_name
 
 
 def make_db(path: Path, session_key: str | None = "agent:prorok-refresh:cron:abc") -> None:
@@ -37,6 +37,13 @@ def test_load_result_and_safe_name(tmp_path):
     assert safe_name(row) == "refresh-3-result-7"
 
 
+def test_load_latest_result(tmp_path):
+    db = tmp_path / "p.sqlite3"
+    make_db(db)
+    row = load_latest_result(db)
+    assert row["refresh_event_result_id"] == 7
+
+
 def test_export_trajectory_uses_collected_session_key(tmp_path, monkeypatch):
     db = tmp_path / "p.sqlite3"
     make_db(db)
@@ -45,7 +52,11 @@ def test_export_trajectory_uses_collected_session_key(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         seen["cmd"] = cmd
-        return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+        output_name = cmd[cmd.index("--output") + 1]
+        bundle = tmp_path / ".openclaw" / "trajectory-exports" / output_name
+        bundle.mkdir(parents=True)
+        (bundle / "manifest.json").write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"outputDir": str(bundle)}), stderr="")
 
     monkeypatch.setattr("prorok.prorok_trajectory_export.subprocess.run", fake_run)
     result = export_trajectory(
@@ -58,7 +69,8 @@ def test_export_trajectory_uses_collected_session_key(tmp_path, monkeypatch):
     assert seen["cmd"][:3] == ["openclaw", "sessions", "export-trajectory"]
     assert seen["cmd"][seen["cmd"].index("--session-key") + 1] == "agent:prorok-refresh:cron:abc"
     assert seen["cmd"][seen["cmd"].index("--output") + 1] == "refresh-3-result-7"
-    assert result["openclaw"] == {"ok": True}
+    assert Path(result["archive_path"]).is_file()
+    assert result["archive_path"].endswith(".zip")
 
 
 def test_export_requires_collected_session_key(tmp_path):
