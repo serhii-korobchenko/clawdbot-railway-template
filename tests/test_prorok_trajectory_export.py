@@ -180,3 +180,41 @@ def test_full_refresh_bundle_replaces_existing_openclaw_staging_dir(tmp_path, mo
         openclaw_bin="openclaw",
     )
     assert Path(result["archive_path"]).is_file()
+
+
+
+def test_cleanup_old_trajectory_artifacts_respects_30_day_boundary(tmp_path):
+    import os
+    from datetime import datetime, timedelta, timezone
+    from prorok.prorok_trajectory_export import cleanup_old_trajectory_artifacts
+
+    now = datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc)
+    export_root = tmp_path / "logs" / "trajectory-exports"
+    staging_root = tmp_path / ".openclaw" / "trajectory-exports"
+    export_root.mkdir(parents=True)
+    staging_root.mkdir(parents=True)
+
+    old_zip = export_root / "refresh-1-full.zip"
+    boundary_zip = export_root / "refresh-2-full.zip"
+    unrelated = export_root / "manual-export.zip"
+    old_stage = staging_root / "refresh-1-result-1"
+    for path in (old_zip, boundary_zip, unrelated):
+        path.write_text("x", encoding="utf-8")
+    old_stage.mkdir()
+    (old_stage / "x").write_text("x", encoding="utf-8")
+
+    old_ts = (now - timedelta(days=31)).timestamp()
+    boundary_ts = (now - timedelta(days=30)).timestamp()
+    for path in (old_zip, unrelated, old_stage):
+        os.utime(path, (old_ts, old_ts))
+    os.utime(boundary_zip, (boundary_ts, boundary_ts))
+
+    removed = cleanup_old_trajectory_artifacts(
+        export_root=export_root, workspace=tmp_path, now=now
+    )
+
+    assert removed == 2
+    assert not old_zip.exists()
+    assert not old_stage.exists()
+    assert boundary_zip.exists()
+    assert unrelated.exists()
