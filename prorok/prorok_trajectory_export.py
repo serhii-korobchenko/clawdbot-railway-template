@@ -57,6 +57,25 @@ def load_latest_result(db: Path) -> sqlite3.Row:
     return row
 
 
+def load_refresh_results(db: Path, refresh_id: int) -> list[sqlite3.Row]:
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT refresh_event_result_id, refresh_id, event_id, cron_id,
+                   session_id, session_key, job_state
+            FROM refresh_event_results
+            WHERE refresh_id = ?
+            ORDER BY refresh_event_result_id
+            """,
+            (refresh_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return list(rows)
+
+
 def normalize_session_key(session_key: str) -> str:
     """Map collector run-specific keys to the stored OpenClaw session key."""
     marker = ":run:"
