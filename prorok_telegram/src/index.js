@@ -2192,7 +2192,7 @@ async function sendLatestLogs(ctx, api) {
   await adapter.sendMedia({
     cfg: api.config,
     to: String(ctx.callback.chatId),
-    text: `PROROK logs · refresh #${result.refresh_id} · ${result.event_id}`,
+    text: `PROROK logs · refresh #${result.refresh_id} · ${result.manifest?.results?.length ?? 0} events`,
     mediaUrl: archivePath,
     mediaLocalRoots: [path.dirname(archivePath)],
     threadId: ctx.threadId,
