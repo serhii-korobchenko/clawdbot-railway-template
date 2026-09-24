@@ -148,4 +148,4 @@ def test_full_refresh_bundle_redacts_secrets_and_keeps_diagnostics(tmp_path, mon
         assert "[REDACTED]" in metadata
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["refresh_id"] == 3
-        assert manifest["secret_redaction"] == "applied"
+        assert manifest["redaction_status"] == "applied"
