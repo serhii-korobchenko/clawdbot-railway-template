@@ -240,6 +240,7 @@ def get_event_detail(
           ON s.source_id = ei.source_id
         LEFT JOIN refresh_candidate_promotions p
           ON p.evidence_id = ei.evidence_id
+         AND p.promotion_action = 'inserted'
         LEFT JOIN refresh_user_decisions d
           ON d.decision_id = p.decision_id
         LEFT JOIN refresh_event_results rer
