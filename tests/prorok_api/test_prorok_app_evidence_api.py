@@ -104,8 +104,8 @@ def test_official_evidence_is_not_duplicated_by_reused_candidate_promotion(
             baseline_probability,selected_probability,decision_source,decided_at
         ) VALUES(?,?,?,?,?,?,?,?)""",
         [
-            (1,100,'active_event','accept',35,35,'telegram','2026-06-02T13:00:00Z'),
-            (2,101,'active_event','accept',35,35,'telegram','2026-06-03T13:00:00Z'),
+            (1,100,'active_event','keep_current',35,35,'telegram','2026-06-02T13:00:00Z'),
+            (2,101,'active_event','keep_current',35,35,'telegram','2026-06-03T13:00:00Z'),
         ],
     )
     conn.executemany(
