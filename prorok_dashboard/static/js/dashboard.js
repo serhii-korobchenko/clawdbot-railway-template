@@ -162,6 +162,49 @@
     });
   }
 
+
+  function renderCandidateActivityChart() {
+    const canvas = document.getElementById("candidate-activity-chart");
+    const dataNode = document.getElementById("candidate-activity-chart-data");
+    if (!canvas || !dataNode || typeof Chart === "undefined") return;
+    let points = [];
+    try { points = JSON.parse(dataNode.dataset.points || "[]"); } catch { return; }
+    if (!Array.isArray(points) || points.length === 0) return;
+
+    const eventIds = [...new Set(points.map((p) => p.event_id))];
+    const labels = [...new Set(points.map((p) => p.refresh_id))];
+    const byKey = new Map(points.map((p) => [`${p.event_id}:${p.refresh_id}`, p]));
+    const datasets = eventIds.map((eventId) => {
+      const sample = points.find((p) => p.event_id === eventId) || {};
+      return {
+        label: sample.event_title || eventId,
+        data: labels.map((refreshId) => byKey.get(`${eventId}:${refreshId}`)?.candidate_count ?? null),
+        tension: 0,
+        fill: false,
+      };
+    });
+
+    new Chart(canvas, {
+      type: "line",
+      data: { labels: labels.map((id) => `#${id}`), datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Кількість candidates" } } },
+        plugins: {
+          legend: { display: eventIds.length > 1, position: "bottom" },
+          tooltip: { callbacks: {
+            afterLabel: (context) => {
+              const eventId = eventIds[context.datasetIndex];
+              const refreshId = labels[context.dataIndex];
+              const point = byKey.get(`${eventId}:${refreshId}`) || {};
+              return [`Refresh #${refreshId}`, `Час: ${point.started_at || "—"}`];
+            }
+          }}
+        }
+      }
+    });
+  }
+
   function syncFilterUrl({ push = false } = {}) {
     const statusField = document.getElementById("status-field");
     const searchField = document.getElementById("event-search");
@@ -226,6 +269,7 @@
   const renderCharts = () => {
     renderProbabilityChart();
     renderEvidenceActivityChart();
+    renderCandidateActivityChart();
   };
 
   if (document.readyState === "loading") {
