@@ -230,6 +230,9 @@ def export_refresh_bundle(
             continue
 
         output_name = safe_name(row)
+        staging_output = workspace / ".openclaw" / "trajectory-exports" / output_name
+        if staging_output.exists():
+            shutil.rmtree(staging_output)
         proc = subprocess.run(
             [
                 openclaw_bin, "sessions", "export-trajectory",
