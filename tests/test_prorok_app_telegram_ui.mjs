@@ -30,3 +30,12 @@ assert.ok(detailPos > appPos);
 assert.ok(evidencePos > detailPos);
 
 console.log("PASS");
+
+
+assert.match(src, /button\("📋 Логи", "logs"/);
+assert.match(src, /TRAJECTORY_EXPORT_CLI/);
+assert.match(src, /async function sendLatestLogs/);
+assert.match(src, /loadAdapter\("telegram"\)/);
+assert.match(src, /adapter\.sendMedia/);
+assert.match(src, /mediaLocalRoots: \[path\.dirname\(archivePath\)\]/);
+assert.match(src, /ctx\.callback\.payload === "logs"/);
