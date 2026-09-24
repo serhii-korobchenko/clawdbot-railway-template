@@ -138,7 +138,7 @@
     <label>Подія
       <select name="candidate_activity_event">
         <option value="">Усі події</option>
-        {% for event in data.items %}
+        {% for event in data['items'] %}
         <option value="{{ event.event_id }}" {% if candidate_activity_event == event.event_id %}selected{% endif %}>{{ event.title }}</option>
         {% endfor %}
       </select>
