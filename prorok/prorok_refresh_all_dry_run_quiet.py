@@ -554,6 +554,7 @@ def main(argv: list[str]) -> int:
             "prompt_file": parsed.get("prompt_file", ""),
             "schedule_output": parsed.get("schedule", ""),
             "cron_id": parsed.get("cron_id", ""),
+            "session_key": (f"agent:{args.agent}:cron:{parsed.get('cron_id', '')}" if parsed.get("cron_id") else ""),
             "run_at": parsed.get("run_at", ""),
             "no_schedule": bool(args.no_schedule),
             "scheduled": scheduled,
