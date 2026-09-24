@@ -149,3 +149,34 @@ def test_full_refresh_bundle_redacts_secrets_and_keeps_diagnostics(tmp_path, mon
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["refresh_id"] == 3
         assert manifest["redaction_status"] == "applied"
+
+
+
+def test_full_refresh_bundle_replaces_existing_openclaw_staging_dir(tmp_path, monkeypatch):
+    db = tmp_path / "p.sqlite3"
+    make_db(db)
+    stale = tmp_path / ".openclaw" / "trajectory-exports" / "refresh-3-result-7"
+    stale.mkdir(parents=True)
+    (stale / "stale.txt").write_text("old", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        output_name = cmd[cmd.index("--output") + 1]
+        bundle = tmp_path / ".openclaw" / "trajectory-exports" / output_name
+        assert not bundle.exists()
+        bundle.mkdir(parents=True)
+        (bundle / "manifest.json").write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"outputDir": str(bundle)}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("prorok.prorok_trajectory_export.subprocess.run", fake_run)
+    result = export_refresh_bundle(
+        3,
+        db=db,
+        workspace=tmp_path,
+        export_root=tmp_path / "exports",
+        openclaw_bin="openclaw",
+    )
+    assert Path(result["archive_path"]).is_file()
