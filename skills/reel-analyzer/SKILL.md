@@ -21,7 +21,7 @@ Use this skill for public Instagram Reel URLs.
 Canonical runtime command:
 
 ```bash
-python3 -m reel_analyzer.reel_analyzer "<INSTAGRAM_REEL_URL>"
+cd /app && python3 -m reel_analyzer.reel_analyzer "<INSTAGRAM_REEL_URL>"
 ```
 
 The command returns JSON containing metadata, `transcript`, and `visual_facts`.
