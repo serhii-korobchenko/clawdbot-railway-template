@@ -24,6 +24,15 @@ class ReelUrlTests(unittest.TestCase):
             canonicalize_reel_url("https://example.com/reel/Dc6Ar0BNoLx/")
 
 
+class ReelSkillRuntimeTests(unittest.TestCase):
+    def test_skill_runs_analyzer_from_app_directory(self):
+        skill = Path("skills/reel-analyzer/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn(
+            'cd /app && python3 -m reel_analyzer.reel_analyzer "<INSTAGRAM_REEL_URL>"',
+            skill,
+        )
+
+
 class ReelMediaTests(unittest.TestCase):
     def test_representative_timestamps_use_segment_midpoints(self):
         self.assertEqual(
