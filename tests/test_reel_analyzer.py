@@ -48,7 +48,25 @@ class ReelOrchestrationTests(unittest.TestCase):
             result = ReelAnalyzer().analyze("https://instagram.com/reel/ABC123/")
         self.assertEqual(result["transcript"], "speech")
         self.assertEqual(result["visual_facts"], "visual")
+        self.assertEqual(result["duration"], 37)
         self.assertEqual(result["url"], "https://www.instagram.com/reel/ABC123/")
+
+    @patch("reel_analyzer.reel_analyzer._probe_duration", return_value=37.5)
+    @patch("reel_analyzer.reel_analyzer.describe_contact_sheet", return_value="visual")
+    @patch("reel_analyzer.reel_analyzer.extract_contact_sheet")
+    @patch("reel_analyzer.reel_analyzer.extract_audio")
+    @patch("reel_analyzer.reel_analyzer.download_public_reel")
+    @patch.object(ReelAnalyzer, "_transcribe", return_value="speech")
+    def test_falls_back_to_media_duration(self, transcribe, download, audio, sheet, vision, probe):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "source.mp4"
+            media.write_bytes(b"x")
+            download.return_value = (media, {"title": "Example", "duration": None})
+            audio.side_effect = lambda _media, output: output
+            sheet.side_effect = lambda _media, output: output
+            result = ReelAnalyzer().analyze("https://instagram.com/reel/ABC123/")
+        self.assertEqual(result["duration"], 37.5)
+        probe.assert_called_once_with(media)
 
     @patch("reel_analyzer.reel_analyzer.download_public_reel", side_effect=RuntimeError("blocked"))
     def test_wraps_pipeline_failure(self, _download):
