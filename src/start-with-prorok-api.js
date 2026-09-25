@@ -1,9 +1,26 @@
 import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const apiHost = process.env.PROROK_API_HOST?.trim() || "0.0.0.0";
 const apiPort = process.env.PROROK_API_PORT?.trim() || "18880";
 const collectorInterval =
   process.env.PROROK_REFRESH_COLLECTOR_INTERVAL_SECONDS?.trim() || "30";
+
+const managedSkills = ["reel-analyzer"];
+const workspaceSkillsDir = "/data/workspace/skills";
+
+for (const skillName of managedSkills) {
+  const source = path.join("/app/skills", skillName);
+  const target = path.join(workspaceSkillsDir, skillName);
+  if (!fs.existsSync(source)) {
+    throw new Error(`Managed skill source missing: ${source}`);
+  }
+  fs.mkdirSync(workspaceSkillsDir, { recursive: true });
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.cpSync(source, target, { recursive: true });
+  console.log(`[skills] synced ${skillName} -> ${target}`);
+}
 
 const children = new Set();
 let shuttingDown = false;
