@@ -10,7 +10,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from .reel_download import canonicalize_reel_url, download_public_reel
-from .reel_media import extract_audio, extract_contact_sheet
+from .reel_media import _probe_duration, extract_audio, extract_contact_sheet
 from .reel_vision import describe_contact_sheet
 
 
@@ -37,6 +37,13 @@ class ReelAnalyzer:
             with tempfile.TemporaryDirectory(prefix="reel-analyzer-") as tmp:
                 workdir = Path(tmp)
                 media, metadata = download_public_reel(url, workdir, max_duration=self.max_duration)
+                duration = metadata.get("duration")
+                if duration is None:
+                    duration = _probe_duration(media)
+                if duration and float(duration) > self.max_duration:
+                    raise ReelAnalysisError(
+                        f"Reel is too long ({float(duration):.1f}s; limit {self.max_duration}s)."
+                    )
                 audio = extract_audio(media, workdir / "audio.wav")
                 sheet = extract_contact_sheet(media, workdir / "contact-sheet.jpg")
                 transcript = self._transcribe(audio)
@@ -45,7 +52,7 @@ class ReelAnalyzer:
                     "url": url,
                     "title": metadata.get("title"),
                     "uploader": metadata.get("uploader"),
-                    "duration": metadata.get("duration"),
+                    "duration": duration,
                     "transcript": transcript,
                     "visual_facts": visual,
                 }
