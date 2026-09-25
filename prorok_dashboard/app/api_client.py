@@ -100,5 +100,74 @@ class ProrokApiClient:
             params["q"] = q
         return await self._get("/api/v1/events", params=params)
 
+    async def list_evidence(
+        self,
+        *,
+        event_id: str | None = None,
+        direction: str | None = None,
+        strength: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        sort: str = "newest",
+        prorok_app: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if event_id:
+            params["event_id"] = event_id
+        if direction:
+            params["direction"] = direction
+        if strength:
+            params["strength"] = strength
+        if source:
+            params["source"] = source
+        if q:
+            params["q"] = q
+        if prorok_app:
+            params["prorok_app"] = prorok_app
+        params["sort"] = sort
+        return await self._get("/api/v1/evidence", params=params)
+
+    async def get_evidence_activity(self, *, status: str = "active", window: str = "7d") -> dict[str, Any]:
+        return await self._get(
+            "/api/v1/evidence/activity",
+            params={"status": status, "window": window},
+        )
+
+    async def list_candidate_evidence(
+        self,
+        *,
+        event_id: str | None = None,
+        direction: str | None = None,
+        strength: str | None = None,
+        validation_state: str | None = None,
+        source: str | None = None,
+        q: str | None = None,
+        sort: str = "newest",
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if event_id:
+            params["event_id"] = event_id
+        if direction:
+            params["direction"] = direction
+        if strength:
+            params["strength"] = strength
+        if validation_state:
+            params["validation_state"] = validation_state
+        if source:
+            params["source"] = source
+        if q:
+            params["q"] = q
+        params["sort"] = sort
+        return await self._get("/api/v1/evidence/candidates", params=params)
+
+    async def get_candidate_activity(self, *, event_id: str | None = None, window: str = "7d", metric: str = "accepted") -> dict[str, Any]:
+        params: dict[str, Any] = {"window": window, "metric": metric}
+        if event_id:
+            params["event_id"] = event_id
+        return await self._get("/api/v1/evidence/candidates/activity", params=params)
+
+    async def get_latest_refresh(self) -> dict[str, Any]:
+        return await self._get("/api/v1/refresh/latest")
+
     async def get_event(self, event_id: str) -> dict[str, Any]:
         return await self._get(f"/api/v1/events/{event_id}")
