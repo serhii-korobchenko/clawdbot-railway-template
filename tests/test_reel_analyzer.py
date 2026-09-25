@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from reel_analyzer.reel_analyzer import ReelAnalyzer, ReelAnalysisError
 from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_reel_url
+from reel_analyzer.reel_media import _representative_timestamps
 
 
 class ReelUrlTests(unittest.TestCase):
@@ -21,6 +22,14 @@ class ReelUrlTests(unittest.TestCase):
     def test_rejects_other_host(self):
         with self.assertRaises(InvalidReelUrl):
             canonicalize_reel_url("https://example.com/reel/Dc6Ar0BNoLx/")
+
+
+class ReelMediaTests(unittest.TestCase):
+    def test_representative_timestamps_use_segment_midpoints(self):
+        self.assertEqual(
+            _representative_timestamps(60.0, 6),
+            [5.0, 15.0, 25.0, 35.0, 45.0, 55.0],
+        )
 
 
 class ReelOrchestrationTests(unittest.TestCase):
