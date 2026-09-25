@@ -36,6 +36,7 @@ def download_public_reel(url: str, workdir: Path, *, max_duration: int = 300) ->
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "noprogress": True,
         "outtmpl": output_template,
         "format": "bestvideo*+bestaudio/best",
         "merge_output_format": "mp4",
