@@ -21,10 +21,10 @@ export default definePluginEntry({
   description: "Deterministically analyzes Instagram Reels posted in Telegram topic 1570.",
   register(api) {
     api.on("before_dispatch", async (event, ctx) => {
-      const channel = event?.channel || ctx?.channel;
-      const threadId = event?.threadId ?? ctx?.threadId;
+      const channel = event?.channel || ctx?.channelId;
+      const sessionKey = event?.sessionKey || ctx?.sessionKey;
       const content = event?.content ?? event?.body ?? "";
-      if (!shouldHandleReel({ channel, threadId, content })) return;
+      if (!shouldHandleReel({ channel, sessionKey, content })) return;
 
       try {
         const result = await analyzeReel(extractReelUrl(content));
