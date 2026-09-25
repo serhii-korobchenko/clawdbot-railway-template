@@ -7,9 +7,10 @@ export function extractReelUrl(text) {
   return `https://www.instagram.com/reel/${match[1]}/`;
 }
 
-export function shouldHandleReel({ channel, threadId, content }) {
+export function shouldHandleReel({ channel, sessionKey, content }) {
+  const topicSuffix = `:topic:${REEL_TOPIC_ID}`;
   return String(channel || "").toLowerCase() === "telegram"
-    && String(threadId ?? "") === REEL_TOPIC_ID
+    && String(sessionKey || "").endsWith(topicSuffix)
     && Boolean(extractReelUrl(content));
 }
 
