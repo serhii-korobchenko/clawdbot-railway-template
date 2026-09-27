@@ -22,4 +22,10 @@ const rendered = formatReelAnalysis({title:"Test Reel",transcript:"Transcript te
 assert.match(rendered, /Аналіз Reel/);
 assert.match(rendered, /Transcript text/);
 assert.match(rendered, /Visual fact/);
+const postRendered = formatReelAnalysis({media_type:"post",summary:"Це змістовне резюме публікації.",visual_facts:"Слайд 1: деталі",transcript:""});
+assert.match(postRendered, /Це змістовне резюме публікації/);
+assert.match(postRendered, /Слайд 1: деталі/);
+assert.doesNotMatch(postRendered, /Зміст фотографій наведено/);
+const postFallback = formatReelAnalysis({media_type:"post",visual_facts:"Слайд 1: деталі"});
+assert.match(postFallback, /Не вдалося сформувати короткий зміст/);
 console.log("PASS");
