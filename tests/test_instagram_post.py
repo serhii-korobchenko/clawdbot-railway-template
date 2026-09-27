@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from reel_analyzer.post_download import PostExtractionError, download_post_images, download_post_media, extract_post_images, extract_post_media
 from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_instagram_url
 from reel_analyzer.reel_analyzer import ReelAnalyzer
+from reel_analyzer.reel_vision import describe_post_images
 
 
 def embed(nodes):
@@ -137,6 +138,21 @@ class PostExtractorTests(unittest.TestCase):
         session.get.return_value = response
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(PostExtractionError, "Could not extract frame"):
             download_post_media("https://instagram.com/p/ABC/", Path(tmp), session=session)
+
+class PostVisionTests(unittest.TestCase):
+    @patch("reel_analyzer.reel_vision.subprocess.run")
+    def test_video_frame_is_labeled_and_selected(self, run):
+        run.return_value = Mock(returncode=0, stdout=json.dumps({"outputs": [{"text": "Деталі кадру"}]}))
+        result = describe_post_images([Path("/tmp/photo.jpg"), Path("/tmp/frame.jpg")],
+                                      selected=2, kinds=["image", "video"])
+        self.assertIn("Слайд 1 (фото)", result)
+        self.assertIn("Слайд 2 (відео: один кадр) (обраний)", result)
+        self.assertIn("not its full content or audio", run.call_args_list[1].args[0][run.call_args_list[1].args[0].index("--prompt") + 1])
+
+    def test_rejects_mismatched_media_types(self):
+        with self.assertRaises(ValueError):
+            describe_post_images([Path("/tmp/photo.jpg")], kinds=["image", "video"])
+
 
 class PostOrchestrationTests(unittest.TestCase):
     @patch("reel_analyzer.reel_analyzer.describe_post_images", return_value="Слайд 2")
