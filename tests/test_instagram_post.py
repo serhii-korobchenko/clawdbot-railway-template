@@ -1,0 +1,82 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+from reel_analyzer.post_download import PostExtractionError, download_post_images, extract_post_images
+from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_instagram_url
+from reel_analyzer.reel_analyzer import ReelAnalyzer
+
+
+def embed(nodes):
+    sidecar = json.dumps({"edges": [{"node": node} for node in nodes]})
+    return 'prefix edge_sidecar_to_children\\":' + sidecar.replace('"', '\\"') + ' suffix'
+
+
+def node(i, *, video=False, url=None):
+    return {"is_video": video, "display_url": url or f"https:\\/\\/scontent.cdninstagram.com\\/image{i}.jpg"}
+
+
+class PostUrlTests(unittest.TestCase):
+    def test_selected_slide_and_tracking_removed(self):
+        self.assertEqual(
+            canonicalize_instagram_url("https://www.oginstagram.com/p/ABC123/?img_index=2&stkn=x"),
+            ("https://www.instagram.com/p/ABC123/?img_index=2", "p", 2),
+        )
+
+    def test_rejects_unsafe_host_and_invalid_index(self):
+        for url in ("https://example.com/p/ABC/", "https://instagram.com.evil.test/p/ABC/",
+                    "https://instagram.com/p/ABC/?img_index=0"):
+            with self.subTest(url=url), self.assertRaises(InvalidReelUrl):
+                canonicalize_instagram_url(url)
+
+
+class PostExtractorTests(unittest.TestCase):
+    def session(self, nodes):
+        session = Mock()
+        response = Mock(status_code=200, text=embed(nodes))
+        response.raise_for_status.return_value = None
+        session.get.return_value = response
+        return session
+
+    def test_extracts_distinct_slides_and_selected_index(self):
+        session = self.session([node(1), node(2), node(3)])
+        urls, selected = extract_post_images("https://instagram.com/p/ABC/?img_index=2", session=session)
+        self.assertEqual(selected, 2)
+        self.assertEqual(urls, [f"https://scontent.cdninstagram.com/image{i}.jpg" for i in range(1, 4)])
+
+    def test_rejects_out_of_range_selection(self):
+        with self.assertRaises(PostExtractionError):
+            extract_post_images("https://instagram.com/p/ABC/?img_index=4", session=self.session([node(1)]))
+
+    def test_rejects_video_and_untrusted_cdn(self):
+        for bad in (node(1, video=True), node(1, url="https:\\/\\/cdninstagram.com.evil.test\\/x.jpg")):
+            with self.subTest(bad=bad), self.assertRaises(PostExtractionError):
+                extract_post_images("https://instagram.com/p/ABC/", session=self.session([bad]))
+
+    @patch("reel_analyzer.post_download.extract_post_images")
+    def test_downloads_images(self, extract):
+        extract.return_value = (["https://scontent.cdninstagram.com/1.jpg", "https://scontent.cdninstagram.com/2.jpg"], 2)
+        session = Mock()
+        session.get.side_effect = [Mock(content=b"one", headers={"Content-Type": "image/jpeg"}),
+                                   Mock(content=b"two", headers={"Content-Type": "image/jpeg"})]
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, selected = download_post_images("https://instagram.com/p/ABC/", Path(tmp), session=session)
+            self.assertEqual([p.read_bytes() for p in paths], [b"one", b"two"])
+            self.assertEqual(selected, 2)
+
+
+class PostOrchestrationTests(unittest.TestCase):
+    @patch("reel_analyzer.reel_analyzer.describe_post_images", return_value="Слайд 2")
+    @patch("reel_analyzer.reel_analyzer.download_post_images", return_value=([Path("/tmp/1.jpg"), Path("/tmp/2.jpg")], 2))
+    def test_post_pipeline(self, download, vision):
+        result = ReelAnalyzer().analyze("https://instagram.com/p/ABC/?img_index=2")
+        self.assertEqual(result["media_type"], "post")
+        self.assertEqual(result["visual_facts"], "Слайд 2")
+        self.assertEqual(result["transcript"], "")
+        self.assertEqual(vision.call_args.kwargs["selected"], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
