@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 from html import unescape
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,7 +26,7 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
     marker = 'edge_sidecar_to_children\\":'
     position = page.find(marker)
     if position < 0:
-        raise PostExtractionError("Public carousel metadata is unavailable.")
+        raise PostExtractionError("Public carousel metadata is unavailable (single-image posts are not yet supported).")
     # Embed stores a JSON object inside an escaped string. Decode only the
     # sidecar object, not the whole page or unrelated captions/scripts.
     fragment = page[position + len(marker):]
@@ -50,7 +49,8 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
         for _ in range(3):
             image_url = image_url.replace("\\\\/", "/").replace("\\/", "/")
         parts = urlsplit(image_url)
-        if parts.scheme != "https" or not (parts.hostname or "").endswith((".cdninstagram.com", ".fbcdn.net")):
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or parts.username or parts.password or parts.port not in (None, 443) or not (host.endswith(".cdninstagram.com") or host.endswith(".fbcdn.net")):
             raise PostExtractionError("Invalid carousel image URL.")
         urls.append(image_url)
     if selected is not None and selected > len(urls):
