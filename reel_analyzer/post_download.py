@@ -26,7 +26,21 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
     marker = 'edge_sidecar_to_children\\":'
     position = page.find(marker)
     if position < 0:
-        raise PostExtractionError("Public carousel metadata is unavailable (single-image posts are not yet supported).")
+        # Single-image embeds expose display_url on the parent media object.
+        # Keep this deliberately separate from the carousel node parser.
+        match = __import__("re").search(r'display_url\\\\":\\\\"(https?:.*?)(?<!\\\\)\\\\"', page)
+        if not match:
+            raise PostExtractionError("Public post media metadata is unavailable.")
+        image_url = match.group(1)
+        for _ in range(3):
+            image_url = image_url.replace("\\\\/", "/").replace("\\/", "/")
+        parts = urlsplit(image_url)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or parts.username or parts.password or parts.port not in (None, 443) or not (host.endswith(".cdninstagram.com") or host.endswith(".fbcdn.net")):
+            raise PostExtractionError("Invalid post image URL.")
+        if selected not in (None, 1):
+            raise PostExtractionError("Selected img_index exceeds post length.")
+        return [image_url], selected
     # Embed stores a JSON object inside an escaped string. Decode only the
     # sidecar object, not the whole page or unrelated captions/scripts.
     fragment = page[position + len(marker):]
