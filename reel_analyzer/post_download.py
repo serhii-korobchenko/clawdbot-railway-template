@@ -44,7 +44,12 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
         if node.get("is_video"):
             raise PostExtractionError("Mixed/video carousels are not supported yet.")
         image_url = node.get("display_url")
-        parts = urlsplit(image_url or "")
+        if not isinstance(image_url, str):
+            raise PostExtractionError("Missing carousel image URL.")
+        # Instagram embeds can double-escape forward slashes in nested JSON.
+        for _ in range(3):
+            image_url = image_url.replace("\\\\/", "/").replace("\\/", "/")
+        parts = urlsplit(image_url)
         if parts.scheme != "https" or not (parts.hostname or "").endswith((".cdninstagram.com", ".fbcdn.net")):
             raise PostExtractionError("Invalid carousel image URL.")
         urls.append(image_url)
