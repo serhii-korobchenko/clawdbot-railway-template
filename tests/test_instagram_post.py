@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from reel_analyzer.post_download import PostExtractionError, download_post_images, download_post_media, extract_post_images, extract_post_media
 from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_instagram_url
-from reel_analyzer.reel_analyzer import ReelAnalyzer
+from reel_analyzer.reel_analyzer import ReelAnalyzer, summarize_post
 from reel_analyzer.reel_vision import describe_post_images
 
 
@@ -154,14 +154,39 @@ class PostVisionTests(unittest.TestCase):
             describe_post_images([Path("/tmp/photo.jpg")], kinds=["image", "video"])
 
 
+class PostSummaryTests(unittest.TestCase):
+    @patch("reel_analyzer.reel_analyzer.OpenAI")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test"})
+    def test_summary_is_generated_from_slide_facts(self, client):
+        choice = Mock(message=Mock(content="Публікація пояснює використання ШІ для програмування."))
+        client.return_value.chat.completions.create.return_value = Mock(choices=[choice])
+        result = summarize_post("Слайд 1: AI coding")
+        self.assertIn("Публікація пояснює", result)
+        kwargs = client.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["messages"][1]["content"], "Слайд 1: AI coding")
+        self.assertIn("Do not list slides", kwargs["messages"][0]["content"])
+
+    @patch("reel_analyzer.reel_analyzer.OpenAI", side_effect=RuntimeError("unavailable"))
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test"})
+    def test_summary_failure_does_not_abort(self, client):
+        self.assertEqual(summarize_post("Слайд 1: text"), "")
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_key_falls_back(self):
+        self.assertEqual(summarize_post("Слайд 1: text"), "")
+
+
 class PostOrchestrationTests(unittest.TestCase):
+    @patch("reel_analyzer.reel_analyzer.summarize_post", return_value="Змістовне резюме.")
     @patch("reel_analyzer.reel_analyzer.describe_post_images", return_value="Слайд 2")
     @patch("reel_analyzer.reel_analyzer.download_post_media", return_value=([Path("/tmp/1.jpg"), Path("/tmp/2.jpg")], 2, ["image", "video"]))
-    def test_post_pipeline(self, download, vision):
+    def test_post_pipeline(self, download, vision, summary):
         result = ReelAnalyzer().analyze("https://instagram.com/p/ABC/?img_index=2")
         self.assertEqual(result["media_type"], "post")
         self.assertEqual(result["visual_facts"], "Слайд 2")
         self.assertEqual(result["transcript"], "")
+        self.assertEqual(result["summary"], "Змістовне резюме.")
+        summary.assert_called_once_with("Слайд 2")
         self.assertEqual(vision.call_args.kwargs["selected"], 2)
         self.assertEqual(vision.call_args.kwargs["kinds"], ["image", "video"])
 
