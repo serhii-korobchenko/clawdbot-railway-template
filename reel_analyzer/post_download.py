@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from html import unescape
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -95,3 +96,54 @@ def download_post_images(raw_url: str, workdir: Path, *, session=None) -> tuple[
         path.write_bytes(response.content)
         images.append(path)
     return images, selected
+
+
+def download_post_media(raw_url: str, workdir: Path, *, session=None) -> tuple[list[Path], int | None, list[str]]:
+    """Download ordered public media; represent each video by a sampled frame."""
+    http = session or requests.Session()
+    media, selected = extract_post_media(raw_url, session=http)
+    workdir.mkdir(parents=True, exist_ok=True)
+    images: list[Path] = []
+    kinds: list[str] = []
+    for index, item in enumerate(media, 1):
+        kind = item["kind"]
+        # Do not follow an unvalidated CDN redirect.
+        response = http.get(item["url"], timeout=30, allow_redirects=False, stream=True)
+        response.raise_for_status()
+        if 300 <= response.status_code < 400:
+            raise PostExtractionError("Unexpected CDN redirect.")
+        content_type = response.headers.get("Content-Type", "").lower()
+        expected = "video/" if kind == "video" else "image/"
+        if not content_type.startswith(expected):
+            raise PostExtractionError(f"Unexpected media type on slide {index}.")
+        limit = 50 * 1024 * 1024 if kind == "video" else 12 * 1024 * 1024
+        suffix = ".mp4" if kind == "video" else ".jpg"
+        path = workdir / f"post-{index:02d}{suffix}"
+        size = 0
+        with path.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=65536):
+                size += len(chunk)
+                if size > limit:
+                    raise PostExtractionError(f"Slide {index} exceeds size limit.")
+                handle.write(chunk)
+        if not size:
+            raise PostExtractionError(f"Slide {index} is empty.")
+        if kind == "video":
+            from .reel_media import _probe_duration
+            duration = _probe_duration(path)
+            if duration > 300:
+                raise PostExtractionError(f"Video slide {index} exceeds 300-second limit.")
+            frame = workdir / f"post-{index:02d}-frame.jpg"
+            proc = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-ss", f"{duration / 2:.3f}", "-i", str(path),
+                 "-frames:v", "1", str(frame)],
+                capture_output=True, text=True, timeout=60,
+            )
+            if proc.returncode or not frame.is_file() or not frame.stat().st_size:
+                raise PostExtractionError(f"Could not extract frame from video slide {index}.")
+            images.append(frame)
+        else:
+            images.append(path)
+        kinds.append(kind)
+    return images, selected, kinds
