@@ -9,9 +9,10 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from .reel_download import canonicalize_reel_url, download_public_reel
+from .reel_download import canonicalize_instagram_url, canonicalize_reel_url, download_public_reel
+from .post_download import download_post_images
 from .reel_media import _probe_duration, extract_audio, extract_contact_sheet
-from .reel_vision import describe_contact_sheet
+from .reel_vision import describe_contact_sheet, describe_post_images
 
 
 class ReelAnalysisError(RuntimeError):
@@ -32,7 +33,20 @@ class ReelAnalyzer:
         return str(result.text or "").strip()
 
     def analyze(self, raw_url: str) -> dict:
-        url = canonicalize_reel_url(raw_url)
+        url, kind, selected = canonicalize_instagram_url(raw_url)
+        if kind == "p":
+            try:
+                with tempfile.TemporaryDirectory(prefix="instagram-post-") as tmp:
+                    images, selected = download_post_images(url, Path(tmp))
+                    visual = describe_post_images(images, selected=selected, model=self.vision_model)
+                    return {
+                        "url": url, "media_type": "post", "title": None,
+                        "uploader": None, "duration": None, "transcript": "",
+                        "visual_facts": visual,
+                    }
+            except Exception as exc:
+                raise ReelAnalysisError(str(exc)) from exc
+        url = canonicalize_reel_url(url)
         try:
             with tempfile.TemporaryDirectory(prefix="reel-analyzer-") as tmp:
                 workdir = Path(tmp)
