@@ -10,7 +10,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from .reel_download import canonicalize_instagram_url, canonicalize_reel_url, download_public_reel
-from .post_download import download_post_images
+from .post_download import download_post_media
 from .reel_media import _probe_duration, extract_audio, extract_contact_sheet
 from .reel_vision import describe_contact_sheet, describe_post_images
 
@@ -37,8 +37,8 @@ class ReelAnalyzer:
         if kind == "p":
             try:
                 with tempfile.TemporaryDirectory(prefix="instagram-post-") as tmp:
-                    images, selected = download_post_images(url, Path(tmp))
-                    visual = describe_post_images(images, selected=selected, model=self.vision_model)
+                    images, selected, kinds = download_post_media(url, Path(tmp))
+                    visual = describe_post_images(images, selected=selected, kinds=kinds, model=self.vision_model)
                     return {
                         "url": url, "media_type": "post", "title": None,
                         "uploader": None, "duration": None, "transcript": "",
