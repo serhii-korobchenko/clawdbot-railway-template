@@ -30,15 +30,20 @@ def describe_contact_sheet(image: Path, *, model: str = "openai/gpt-4.1-mini") -
     return text
 
 
-def describe_post_images(images: list[Path], *, selected: int | None = None, model: str = "openai/gpt-4.1-mini") -> str:
+def describe_post_images(images: list[Path], *, selected: int | None = None, kinds: list[str] | None = None, model: str = "openai/gpt-4.1-mini") -> str:
     """Analyze each carousel slide independently, preserving its index."""
     if not images:
         raise ValueError("No carousel images.")
+    if kinds is not None and (len(kinds) != len(images) or any(k not in ("image", "video") for k in kinds)):
+        raise ValueError("Invalid carousel media types.")
     output = []
     for index, path in enumerate(images, 1):
+        video = kinds is not None and kinds[index - 1] == "video"
         focus = " This is the user-selected slide." if index == selected else ""
         prompt = (
-            f"Instagram carousel slide {index} of {len(images)}.{focus} "
+            f"Instagram carousel slide {index} of {len(images)}. "
+            + ("This is one representative frame of a video, not its full content or audio. " if video else "This is a photo. ")
+            + focus + " "
             "Extract readable text, resources, URLs and practical information in Ukrainian. "
             "Preserve reliably legible exact wording. Do not invent unreadable details or describe appearance."
         )
@@ -56,5 +61,5 @@ def describe_post_images(images: list[Path], *, selected: int | None = None, mod
             raise RuntimeError(f"Invalid vision result for slide {index}.") from exc
         if not detail:
             raise RuntimeError(f"Empty vision result for slide {index}.")
-        output.append(f"Слайд {index}" + (" (обраний)" if index == selected else "") + f":\n{detail}")
+        output.append(f"Слайд {index}" + (" (відео: один кадр)" if video else " (фото)") + (" (обраний)" if index == selected else "") + f":\n{detail}")
     return "\n\n".join(output)
