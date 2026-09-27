@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { extractReelUrl, formatReelAnalysis, shouldHandleReel } from "./routing.js";
+import { extractInstagramUrl, formatReelAnalysis, shouldHandleReel } from "./routing.js";
 
 const execFileAsync = promisify(execFile);
 const PYTHON_BIN = process.env.REEL_ANALYZER_PYTHON || "python3";
@@ -47,9 +47,9 @@ export default definePluginEntry({
         && String(sessionKey || "").endsWith(":topic:1570");
       if (!inTargetTopic) return;
 
-      const reelUrl = extractReelUrl(content);
+      const reelUrl = extractInstagramUrl(content);
       const matched = shouldHandleReel({ channel, sessionKey, content });
-      api.logger?.info?.(`[reel-telegram] before_dispatch target_topic=true reel_url_present=${Boolean(reelUrl)} matched=${matched}`);
+      api.logger?.info?.(`[reel-telegram] before_dispatch target_topic=true instagram_url_present=${Boolean(reelUrl)} matched=${matched}`);
       if (!matched) return;
 
       api.logger?.info?.("[reel-telegram] analyzer started");
