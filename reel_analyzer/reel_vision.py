@@ -56,5 +56,5 @@ def describe_post_images(images: list[Path], *, selected: int | None = None, mod
             raise RuntimeError(f"Invalid vision result for slide {index}.") from exc
         if not detail:
             raise RuntimeError(f"Empty vision result for slide {index}.")
-        output.append(f"Слайд {index}" + (" (обраний)" if index == selected else "") + f":\\n{detail}")
-    return "\\n\\n".join(output)
+        output.append(f"Слайд {index}" + (" (обраний)" if index == selected else "") + f":\n{detail}")
+    return "\n\n".join(output)
