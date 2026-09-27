@@ -57,6 +57,14 @@ class PostExtractorTests(unittest.TestCase):
         with self.assertRaises(PostExtractionError):
             extract_post_images("https://instagram.com/p/ABC/?img_index=4", session=self.session([node(1)]))
 
+    def test_mixed_carousel_fixture_preserves_order(self):
+        nodes = [node(1), {**node(2, video=True), "video_url": "https:\\/\\/scontent.cdninstagram.com\\/clip.mp4"}, node(3)]
+        session = self.session(nodes)
+        with self.assertRaisesRegex(PostExtractionError, "Mixed/video"):
+            extract_post_images("https://instagram.com/p/ABC/?img_index=2", session=session)
+        # Video media requires a separate, validated downloader and frame extraction.
+        # Do not silently analyze its thumbnail as if it were the video.
+
     def test_rejects_video_and_untrusted_cdn(self):
         for bad in (node(1, video=True), node(1, url="https:\\/\\/cdninstagram.com.evil.test\\/x.jpg")):
             with self.subTest(bad=bad), self.assertRaises(PostExtractionError):
