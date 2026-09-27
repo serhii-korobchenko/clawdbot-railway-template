@@ -46,6 +46,13 @@ class PostExtractorTests(unittest.TestCase):
         self.assertEqual(selected, 2)
         self.assertEqual(urls, [f"https://scontent.cdninstagram.com/image{i}.jpg" for i in range(1, 4)])
 
+    def test_single_photo_embed_fixture(self):
+        session = Mock()
+        session.get.return_value = Mock(text='prefix display_url\\\\":\\\\"https:\\\\/\\\\/scontent.cdninstagram.com\\\\/single.jpg\\\\" suffix')
+        urls, selected = extract_post_images("https://instagram.com/p/ABC/", session=session)
+        self.assertEqual(urls, ["https://scontent.cdninstagram.com/single.jpg"])
+        self.assertIsNone(selected)
+
     def test_rejects_out_of_range_selection(self):
         with self.assertRaises(PostExtractionError):
             extract_post_images("https://instagram.com/p/ABC/?img_index=4", session=self.session([node(1)]))
