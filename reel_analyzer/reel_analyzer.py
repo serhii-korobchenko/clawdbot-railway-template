@@ -19,6 +19,35 @@ class ReelAnalysisError(RuntimeError):
     pass
 
 
+def summarize_post(visual_facts: str) -> str:
+    """Synthesize a short Ukrainian overview from recognized slide facts only."""
+    if not visual_facts.strip():
+        return ""
+    if not os.getenv("OPENAI_API_KEY"):
+        return ""
+    try:
+        response = OpenAI().chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": (
+                    "Write a substantive 2–4 sentence Ukrainian summary of an Instagram post "
+                    "from the supplied slide observations. State its main topic, central message "
+                    "and practical takeaway when present. Do not list slides, repeat their text "
+                    "verbatim, add unsupported facts, or present claims in the post as verified. "
+                    "If the post is promotional, mention that. Output only the summary."
+                )},
+                {"role": "user", "content": visual_facts},
+            ],
+            max_tokens=240,
+            temperature=0.2,
+            timeout=45,
+        )
+        return str(response.choices[0].message.content or "").strip()
+    except Exception:
+        # Summary is optional: a model/API failure must not discard the slide analysis.
+        return ""
+
+
 class ReelAnalyzer:
     def __init__(self, *, max_duration: int = 300, vision_model: str = "openai/gpt-4.1-mini"):
         self.max_duration = max_duration
@@ -43,6 +72,7 @@ class ReelAnalyzer:
                         "url": url, "media_type": "post", "title": None,
                         "uploader": None, "duration": None, "transcript": "",
                         "visual_facts": visual,
+                        "summary": summarize_post(visual),
                     }
             except Exception as exc:
                 raise ReelAnalysisError(str(exc)) from exc
