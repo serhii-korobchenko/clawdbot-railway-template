@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from yt_dlp import YoutubeDL
 
@@ -56,3 +56,25 @@ def download_public_reel(url: str, workdir: Path, *, max_duration: int = 300) ->
     if media is None:
         raise RuntimeError("yt-dlp completed without a supported media file.")
     return media, info
+
+_POST_PATH = re.compile(r"^/p/([A-Za-z0-9_-]+)/?$")
+_PUBLIC_HOSTS = _ALLOWED_HOSTS | {"oginstagram.com", "www.oginstagram.com"}
+
+
+def canonicalize_instagram_url(raw_url: str) -> tuple[str, str, int | None]:
+    parts = urlsplit((raw_url or "").strip())
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in _PUBLIC_HOSTS:
+        raise InvalidReelUrl("Only public Instagram HTTPS URLs are supported.")
+    reel = _REEL_PATH.fullmatch(parts.path)
+    post = _POST_PATH.fullmatch(parts.path)
+    if not reel and not post:
+        raise InvalidReelUrl("Expected an Instagram Reel or post URL.")
+    kind, match = ("reel", reel) if reel else ("p", post)
+    raw_index = parse_qs(parts.query).get("img_index", [None])[0] if kind == "p" else None
+    if raw_index is not None and (not re.fullmatch(r"[1-9][0-9]*", raw_index) or int(raw_index) > 20):
+        raise InvalidReelUrl("Invalid img_index.")
+    selected = int(raw_index) if raw_index else None
+    url = f"https://www.instagram.com/{kind}/{match.group(1)}/"
+    if selected is not None:
+        url += f"?img_index={selected}"
+    return url, kind, selected
