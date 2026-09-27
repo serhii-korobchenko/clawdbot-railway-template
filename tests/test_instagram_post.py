@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from reel_analyzer.post_download import PostExtractionError, download_post_images, extract_post_images
+from reel_analyzer.post_download import PostExtractionError, download_post_images, extract_post_images, extract_post_media
 from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_instagram_url
 from reel_analyzer.reel_analyzer import ReelAnalyzer
 
@@ -60,8 +60,12 @@ class PostExtractorTests(unittest.TestCase):
     def test_mixed_carousel_fixture_preserves_order(self):
         nodes = [node(1), {**node(2, video=True), "video_url": "https:\\/\\/scontent.cdninstagram.com\\/clip.mp4"}, node(3)]
         session = self.session(nodes)
+        media, selected = extract_post_media("https://instagram.com/p/ABC/?img_index=2", session=session)
+        self.assertEqual([item["kind"] for item in media], ["image", "video", "image"])
+        self.assertEqual(selected, 2)
+        self.assertEqual(media[1]["url"], "https://scontent.cdninstagram.com/clip.mp4")
         with self.assertRaisesRegex(PostExtractionError, "Mixed/video"):
-            extract_post_images("https://instagram.com/p/ABC/?img_index=2", session=session)
+            extract_post_images("https://instagram.com/p/ABC/?img_index=2", session=self.session(nodes))
         # Video media requires a separate, validated downloader and frame extraction.
         # Do not silently analyze its thumbnail as if it were the video.
 
