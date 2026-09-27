@@ -10,7 +10,7 @@ async function analyzeReel(url) {
   const { stdout } = await execFileAsync(
     PYTHON_BIN,
     ["-m", "reel_analyzer.reel_analyzer", url],
-    { cwd: "/app", env: process.env, maxBuffer: 1024 * 1024, timeout: 180000 },
+    { cwd: "/app", env: process.env, maxBuffer: 1024 * 1024, timeout: url.includes("/p/") ? 900000 : 180000 },
   );
   return JSON.parse(stdout);
 }
@@ -63,7 +63,7 @@ export default definePluginEntry({
           ? String(error.code).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40)
           : "unknown";
         api.logger?.warn?.(`[reel-telegram] analyzer failed code=${errorCode}`);
-        text = "Не вдалося проаналізувати цей Reel. Він може бути приватним, видаленим, обмеженим Instagram або тимчасово недоступним. Спробуйте ще раз пізніше.";
+        text = "Не вдалося проаналізувати цю публікацію Instagram. Він може бути приватним, видаленим, обмеженим Instagram або тимчасово недоступним. Спробуйте ще раз пізніше.";
       }
 
       try {
