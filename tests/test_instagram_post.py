@@ -86,6 +86,58 @@ class PostExtractorTests(unittest.TestCase):
             self.assertEqual(selected, 2)
 
 
+
+    @patch("reel_analyzer.reel_media._probe_duration", return_value=12.0)
+    @patch("reel_analyzer.post_download.subprocess.run")
+    @patch("reel_analyzer.post_download.extract_post_media")
+    def test_mixed_media_download_and_frame(self, extract, run, probe):
+        extract.return_value = (
+            [{"kind": "image", "url": "https://scontent.cdninstagram.com/1.jpg"},
+             {"kind": "video", "url": "https://scontent.cdninstagram.com/2.mp4"},
+             {"kind": "image", "url": "https://scontent.cdninstagram.com/3.jpg"}], 2)
+        session = Mock()
+        responses = []
+        for data, mime in ((b"photo1", "image/jpeg"), (b"video2", "video/mp4"), (b"photo3", "image/jpeg")):
+            response = Mock(status_code=200, headers={"Content-Type": mime})
+            response.iter_content.return_value = iter([data])
+            responses.append(response)
+        session.get.side_effect = responses
+
+        def ffmpeg(args, **kwargs):
+            Path(args[-1]).write_bytes(b"frame")
+            return Mock(returncode=0)
+        run.side_effect = ffmpeg
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, selected, kinds = download_post_media("https://instagram.com/p/ABC/?img_index=2", Path(tmp), session=session)
+            self.assertEqual(kinds, ["image", "video", "image"])
+            self.assertEqual(selected, 2)
+            self.assertEqual([p.read_bytes() for p in paths], [b"photo1", b"frame", b"photo3"])
+            self.assertEqual(probe.call_count, 1)
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue(all(call.kwargs["allow_redirects"] is False for call in session.get.call_args_list))
+
+    @patch("reel_analyzer.post_download.extract_post_media")
+    def test_rejects_oversized_video_stream(self, extract):
+        extract.return_value = ([{"kind": "video", "url": "https://scontent.cdninstagram.com/2.mp4"}], None)
+        response = Mock(status_code=200, headers={"Content-Type": "video/mp4"})
+        response.iter_content.return_value = iter([b"x" * (50 * 1024 * 1024 + 1)])
+        session = Mock()
+        session.get.return_value = response
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(PostExtractionError, "size limit"):
+            download_post_media("https://instagram.com/p/ABC/", Path(tmp), session=session)
+
+    @patch("reel_analyzer.reel_media._probe_duration", return_value=12.0)
+    @patch("reel_analyzer.post_download.subprocess.run", return_value=Mock(returncode=1))
+    @patch("reel_analyzer.post_download.extract_post_media")
+    def test_rejects_failed_video_frame_extraction(self, extract, run, probe):
+        extract.return_value = ([{"kind": "video", "url": "https://scontent.cdninstagram.com/2.mp4"}], None)
+        response = Mock(status_code=200, headers={"Content-Type": "video/mp4"})
+        response.iter_content.return_value = iter([b"video"])
+        session = Mock()
+        session.get.return_value = response
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(PostExtractionError, "Could not extract frame"):
+            download_post_media("https://instagram.com/p/ABC/", Path(tmp), session=session)
+
 class PostOrchestrationTests(unittest.TestCase):
     @patch("reel_analyzer.reel_analyzer.describe_post_images", return_value="Слайд 2")
     @patch("reel_analyzer.reel_analyzer.download_post_media", return_value=([Path("/tmp/1.jpg"), Path("/tmp/2.jpg")], 2, ["image", "video"]))
