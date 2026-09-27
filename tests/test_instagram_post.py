@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from reel_analyzer.post_download import PostExtractionError, download_post_images, extract_post_images, extract_post_media
+from reel_analyzer.post_download import PostExtractionError, download_post_images, download_post_media, extract_post_images, extract_post_media
 from reel_analyzer.reel_download import InvalidReelUrl, canonicalize_instagram_url
 from reel_analyzer.reel_analyzer import ReelAnalyzer
 
@@ -88,13 +88,14 @@ class PostExtractorTests(unittest.TestCase):
 
 class PostOrchestrationTests(unittest.TestCase):
     @patch("reel_analyzer.reel_analyzer.describe_post_images", return_value="Слайд 2")
-    @patch("reel_analyzer.reel_analyzer.download_post_images", return_value=([Path("/tmp/1.jpg"), Path("/tmp/2.jpg")], 2))
+    @patch("reel_analyzer.reel_analyzer.download_post_media", return_value=([Path("/tmp/1.jpg"), Path("/tmp/2.jpg")], 2, ["image", "video"]))
     def test_post_pipeline(self, download, vision):
         result = ReelAnalyzer().analyze("https://instagram.com/p/ABC/?img_index=2")
         self.assertEqual(result["media_type"], "post")
         self.assertEqual(result["visual_facts"], "Слайд 2")
         self.assertEqual(result["transcript"], "")
         self.assertEqual(vision.call_args.kwargs["selected"], 2)
+        self.assertEqual(vision.call_args.kwargs["kinds"], ["image", "video"])
 
 
 if __name__ == "__main__":
