@@ -26,6 +26,7 @@ export function shouldHandleReel({ channel, sessionKey, content }) {
 
 export function formatReelAnalysis(result) {
   const transcript = String(result?.transcript || "").trim();
+  const summary = String(result?.summary || "").trim();
   const visualFacts = String(result?.visual_facts || "").trim();
   const title = String(result?.title || "").trim();
   const isPost = result?.media_type === "post";
@@ -34,7 +35,7 @@ export function formatReelAnalysis(result) {
     title ? `**${title}**` : null,
     "",
     "**1. Короткий зміст**",
-    transcript || (isPost ? "Зміст фотографій наведено нижче за слайдами." : "Не вдалося надійно розпізнати мовлення."),
+    isPost ? (summary || "Не вдалося сформувати короткий зміст; деталі наведено нижче за слайдами.") : (transcript || "Не вдалося надійно розпізнати мовлення."),
     "",
     "**2. Головні тези, ресурси та практичні деталі**",
     visualFacts || "Не вдалося надійно витягти візуальні деталі.",
