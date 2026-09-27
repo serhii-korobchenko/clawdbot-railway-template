@@ -15,7 +15,7 @@ class PostExtractionError(RuntimeError):
     pass
 
 
-def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int | None]:
+def extract_post_media(raw_url: str, *, session=None) -> tuple[list[dict], int | None]:
     url, kind, selected = canonicalize_instagram_url(raw_url)
     if kind != "p":
         raise PostExtractionError("Expected an Instagram post URL.")
@@ -40,7 +40,7 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
             raise PostExtractionError("Invalid post image URL.")
         if selected not in (None, 1):
             raise PostExtractionError("Selected img_index exceeds post length.")
-        return [image_url], selected
+        return [{"kind": "image", "url": image_url}], selected
     # Embed stores a JSON object inside an escaped string. Decode only the
     # sidecar object, not the whole page or unrelated captions/scripts.
     fragment = page[position + len(marker):]
@@ -52,13 +52,12 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
         raise PostExtractionError("Invalid public carousel metadata.") from exc
     if not nodes or len(nodes) > 20:
         raise PostExtractionError("Unsupported carousel size.")
-    urls = []
+    media = []
     for node in nodes:
-        if node.get("is_video"):
-            raise PostExtractionError("Mixed/video carousels are not supported yet.")
-        image_url = node.get("display_url")
+        is_video = bool(node.get("is_video"))
+        image_url = node.get("video_url") if is_video else node.get("display_url")
         if not isinstance(image_url, str):
-            raise PostExtractionError("Missing carousel image URL.")
+            raise PostExtractionError("Missing carousel media URL.")
         # Instagram embeds can double-escape forward slashes in nested JSON.
         for _ in range(3):
             image_url = image_url.replace("\\\\/", "/").replace("\\/", "/")
@@ -66,10 +65,18 @@ def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int |
         host = (parts.hostname or "").lower()
         if parts.scheme != "https" or parts.username or parts.password or parts.port not in (None, 443) or not (host.endswith(".cdninstagram.com") or host.endswith(".fbcdn.net")):
             raise PostExtractionError("Invalid carousel image URL.")
-        urls.append(image_url)
-    if selected is not None and selected > len(urls):
+        media.append({"kind": "video" if is_video else "image", "url": image_url})
+    if selected is not None and selected > len(media):
         raise PostExtractionError("Selected img_index exceeds carousel length.")
-    return urls, selected
+    return media, selected
+
+
+def extract_post_images(raw_url: str, *, session=None) -> tuple[list[str], int | None]:
+    """Legacy image-only interface: never misrepresent video slides as images."""
+    media, selected = extract_post_media(raw_url, session=session)
+    if any(item["kind"] != "image" for item in media):
+        raise PostExtractionError("Mixed/video carousels require video-aware processing.")
+    return [item["url"] for item in media], selected
 
 
 def download_post_images(raw_url: str, workdir: Path, *, session=None) -> tuple[list[Path], int | None]:
