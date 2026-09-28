@@ -43,7 +43,23 @@ def test_launcher_rejects_invalid_cron_response(payload):
 
 
 def test_quiet_wrapper_does_not_duplicate_metadata(capsys):
-    quiet.SUMMARY.clear()
     with patch.object(quiet.launcher, "main", side_effect=lambda argv: (print("cron_id: cron-123"), 0)[1]):
         assert quiet.main([]) == 0
     assert capsys.readouterr().out.count("cron_id: cron-123") == 1
+
+
+def test_quiet_wrapper_preserves_subprocess_and_restores_prompt():
+    original_run = launcher.subprocess.run
+    original_prompt = launcher.build_prompt
+    with patch.object(quiet.launcher, "main", return_value=0):
+        assert quiet.main([]) == 0
+        assert launcher.subprocess.run is original_run
+        assert launcher.build_prompt is original_prompt
+
+
+def test_quiet_wrapper_restores_prompt_after_failure():
+    original_prompt = launcher.build_prompt
+    with patch.object(quiet.launcher, "main", side_effect=RuntimeError("failed")):
+        with pytest.raises(RuntimeError, match="failed"):
+            quiet.main([])
+    assert launcher.build_prompt is original_prompt
