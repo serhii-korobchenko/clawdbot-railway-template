@@ -113,3 +113,13 @@ spawnManaged(
   ],
   "PROROK refresh collector"
 );
+
+spawnManaged(
+  "python3",
+  [
+    "prorok/prorok_standalone_freshness_watcher.py",
+    "--interval-seconds",
+    collectorInterval,
+  ],
+  "PROROK standalone freshness watcher"
+);
