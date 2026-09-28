@@ -15,11 +15,14 @@ import prorok_refresh_collector_v6 as v6
 import prorok_refresh_collector as collector
 
 
-def wait_for_transcript(state_dir: Path, cron_id: str, timeout_seconds: float = 360) -> Path:
+def wait_for_transcript(
+    state_dir: Path, cron_id: str, timeout_seconds: float = 360,
+    *, min_run_at_ms: int | None = None, expected_session_id: str | None = None,
+) -> Path:
     deadline = time.monotonic() + timeout_seconds
     while True:
         run = collector.find_latest_finished_run(state_dir, cron_id)
-        if run is not None:
+        if run is not None and (min_run_at_ms is None or run.run_at_ms >= min_run_at_ms) and (expected_session_id is None or run.session_id == expected_session_id):
             if run.status != "ok":
                 raise ValueError("cron execution failed")
             if not run.session_id:
@@ -61,9 +64,15 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--cron-id")
     parser.add_argument("--state-dir", type=Path, default=Path(collector.DEFAULT_STATE_DIR))
     parser.add_argument("--timeout-seconds", type=float, default=360)
+    parser.add_argument("--min-run-at-ms", type=int, default=None)
+    parser.add_argument("--expected-session-id", default=None)
     args = parser.parse_args(argv)
     try:
-        path = (wait_for_transcript(args.state_dir, args.cron_id, args.timeout_seconds)
+        path = (wait_for_transcript(
+                    args.state_dir, args.cron_id, args.timeout_seconds,
+                    min_run_at_ms=args.min_run_at_ms,
+                    expected_session_id=args.expected_session_id,
+                )
                 if args.cron_id else args.session_jsonl)
         valid, reason, required = check_freshness(path)
     except (OSError, ValueError, TimeoutError) as exc:
