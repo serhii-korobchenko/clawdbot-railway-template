@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import fcntl
+from contextlib import contextmanager
 import subprocess
 from pathlib import Path
 
@@ -24,7 +26,25 @@ def notification_text(job: dict) -> str:
     ])
 
 
+@contextmanager
+def notification_lock(registry: Path):
+    lock_path = registry.with_name(registry.name + ".notify.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def notify_once(registry: Path = DEFAULT_REGISTRY) -> dict[str, int]:
+    with notification_lock(registry):
+        return _notify_locked(registry)
+
+
+def _notify_locked(registry: Path) -> dict[str, int]:
     counts = {"sent": 0, "failed": 0, "skipped": 0}
     for job in registered_jobs(registry).values():
         result = job.get("result")
