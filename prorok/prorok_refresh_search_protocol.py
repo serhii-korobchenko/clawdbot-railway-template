@@ -124,6 +124,12 @@ def _build_search_protocol(prompt: str) -> str:
    - окремо перевір авторитетні першоджерела, великі медіа, think tanks або профільні інститути, якщо broad search недостатній; source-specific check теж повинен використовувати include_domains, а не доменне ім'я або search qualifier у query;
    - NO_NEW_EVIDENCE_FOUND дозволено тільки після виконання search protocol, обов'язкових zero-result retries та freshness verification для описаних вище результатів без published;
    - не створюй candidate evidence лише для проходження цього правила: якщо після достатнього пошуку й перевірки якісних нових evidence немає, поверни NO_NEW_EVIDENCE_FOUND.
+\n14. Mandatory pre-report freshness checkpoint (perform AFTER all searches, BEFORE composing the final report):
+   - переглянь фактичні tool results перших трьох tavily_search calls, не покладайся на пам'ять чи текст майбутнього звіту;
+   - для КОЖНОГО з цих трьох searches визнач перші 3 результати з URL та порожнім/відсутнім published; дедуплікуй URL між searches, але не пропускай жодного required URL;
+   - перевір, що ПІСЛЯ відповідного search для кожного required URL уже був виклик tavily_extract (можна batch urls) або web_fetch з цим URL; сам по собі пошук, припущення щодо дати або відмова від використання джерела НЕ замінює verification call;
+   - якщо хоч один required URL ще не перевірений, виконай відсутні verification calls ЗАРАЗ, навіть якщо збираєшся повернути NO_NEW_EVIDENCE_FOUND або джерело нерелевантне;
+   - лише після завершення всіх verification calls переходь до фінального PROROK_REFRESH_DRY_RUN; не додавай checkpoint чи перелік URL до фінальної відповіді.
 """.strip()
 
 
