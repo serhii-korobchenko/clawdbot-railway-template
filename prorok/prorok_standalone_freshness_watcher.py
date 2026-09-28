@@ -8,6 +8,7 @@ from pathlib import Path
 
 import prorok_refresh_collector as collector
 import prorok_refresh_session_freshness_check as freshness
+from prorok_standalone_freshness_notifier import notify_once
 from prorok_standalone_freshness_registry import (
     DEFAULT_REGISTRY, record_result, registered_jobs,
 )
@@ -72,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.interval_seconds <= 0:
         parser.error("--interval-seconds must be positive")
     while True:
-        print(collect_once(args.registry, args.state_dir), flush=True)
+        checked = collect_once(args.registry, args.state_dir)
+        notified = notify_once(args.registry)
+        print({"freshness": checked, "notifications": notified}, flush=True)
         if args.once:
             return 0
         time.sleep(args.interval_seconds)
