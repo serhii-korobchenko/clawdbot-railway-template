@@ -218,11 +218,15 @@ def quiet_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
 
 
 def main(argv: list[str]) -> int:
-    launcher.subprocess.run = quiet_run
-    launcher.build_prompt = guarded_build_prompt
-    result = launcher.main(argv)
-    # The underlying launcher emits validated cron metadata.
-    return result
+    previous_run = launcher.subprocess.run
+    previous_prompt = launcher.build_prompt
+    try:
+        launcher.subprocess.run = quiet_run
+        launcher.build_prompt = guarded_build_prompt
+        return launcher.main(argv)
+    finally:
+        launcher.subprocess.run = previous_run
+        launcher.build_prompt = previous_prompt
 
 
 if __name__ == "__main__":
