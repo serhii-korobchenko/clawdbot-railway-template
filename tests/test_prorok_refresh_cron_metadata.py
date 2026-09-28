@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from prorok import prorok_refresh_dry_run_cron as launcher
-from prorok import prorok_refresh_dry_run_quiet as quiet
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prorok"))
+import prorok_refresh_dry_run_cron as launcher
+import prorok_refresh_dry_run_quiet as quiet
 
 
 def args():
