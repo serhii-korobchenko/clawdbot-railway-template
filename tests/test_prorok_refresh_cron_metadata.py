@@ -63,3 +63,41 @@ def test_quiet_wrapper_restores_prompt_after_failure():
         with pytest.raises(RuntimeError, match="failed"):
             quiet.main([])
     assert launcher.build_prompt is original_prompt
+
+
+def test_delivered_cron_is_registered(tmp_path, capsys):
+    job_args = args()
+    job_args.no_deliver = False
+    job_args.freshness_registry = tmp_path / "jobs.jsonl"
+    payload = {"id": "cron-delivered", "state": {"nextRunAtMs": 456}}
+    with patch.object(launcher.subprocess, "run", return_value=subprocess.CompletedProcess(
+        [], 0, stdout=json.dumps(payload), stderr=""
+    )):
+        launcher.schedule_cron(job_args, "prompt")
+    from prorok_standalone_freshness_registry import registered_jobs
+    record = registered_jobs(job_args.freshness_registry)["cron-delivered"]
+    assert record["event_id"] == "event-test"
+    assert record["chat_id"] == "chat"
+    assert record["expected_run_at_ms"] == 456
+    assert capsys.readouterr().out.count("cron_id: cron-delivered") == 1
+
+
+def test_silent_batch_cron_is_not_registered(tmp_path):
+    job_args = args()
+    job_args.freshness_registry = tmp_path / "jobs.jsonl"
+    with patch.object(launcher.subprocess, "run", return_value=subprocess.CompletedProcess(
+        [], 0, stdout='{"id":"cron-batch"}', stderr=""
+    )):
+        launcher.schedule_cron(job_args, "prompt")
+    assert not job_args.freshness_registry.exists()
+
+
+def test_registration_failure_reports_created_cron(tmp_path):
+    job_args = args()
+    job_args.no_deliver = False
+    job_args.freshness_registry = tmp_path / "jobs.jsonl"
+    with patch.object(launcher.subprocess, "run", return_value=subprocess.CompletedProcess(
+        [], 0, stdout='{"id":"cron-created"}', stderr=""
+    )), patch.object(launcher, "register_job", side_effect=OSError("disk error")):
+        with pytest.raises(RuntimeError, match="cron cron-created was created"):
+            launcher.schedule_cron(job_args, "prompt")
