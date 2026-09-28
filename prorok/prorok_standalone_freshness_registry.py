@@ -8,10 +8,28 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
 
 DEFAULT_REGISTRY = Path("/data/workspace/prorok/standalone_freshness_jobs.jsonl")
+
+
+def append_record(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        if os.write(fd, payload) != len(payload):
+            raise OSError("short registry write")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def record_result(path: Path, *, cron_id: str, status: str, reason: str, required: int) -> None:
+    if status not in {"PASS", "FAIL", "ERROR"} or not cron_id:
+        raise ValueError("invalid freshness result")
+    append_record(path, {"kind": "result", "cron_id": cron_id,
+                         "status": status, "reason": reason, "required": required})
 
 
 def register_job(path: Path, *, cron_id: str, event_id: str,
@@ -25,15 +43,7 @@ def register_job(path: Path, *, cron_id: str, event_id: str,
         "created_at_ms": created_at_ms,
         "expected_run_at_ms": expected_run_at_ms,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        if os.write(fd, payload) != len(payload):
-            raise OSError("short registry write")
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    append_record(path, record)
     return record
 
 
@@ -53,4 +63,6 @@ def registered_jobs(path: Path) -> dict[str, dict]:
                 raise ValueError(f"invalid registry entry at line {number}")
             if item.get("kind") == "registered":
                 jobs[item["cron_id"]] = item
+            elif item.get("kind") == "result" and item["cron_id"] in jobs:
+                jobs[item["cron_id"]] = {**jobs[item["cron_id"]], "result": item}
     return jobs
