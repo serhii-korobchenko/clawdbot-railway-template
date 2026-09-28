@@ -4,7 +4,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prorok"))
-from prorok_refresh_session_freshness_check import check_freshness
+from prorok_refresh_session_freshness_check import check_freshness, wait_for_transcript
+from unittest.mock import patch
+from prorok_refresh_collector import CronRun
 
 
 def transcript(tmp_path, verify=False, published=None):
@@ -52,3 +54,26 @@ def test_missing_search_result_fails_closed(tmp_path):
     valid, reason, _ = check_freshness(path)
     assert not valid
     assert "tool result payload is missing" in reason
+
+
+def test_cron_watcher_resolves_completed_transcript(tmp_path):
+    run = CronRun("cron-1", 1, "ok", "session-1", "agent:prorok-refresh:cron:cron-1", None, None, None, None, None, None, None)
+    expected = tmp_path / "session.jsonl"
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=run), patch("prorok_refresh_session_freshness_check.collector.resolve_session_transcript_path", return_value=expected) as resolve:
+        assert wait_for_transcript(tmp_path, "cron-1", 0) == expected
+        resolve.assert_called_once_with(tmp_path, "session-1", run.session_key)
+
+
+def test_cron_watcher_fails_closed_on_missing_session(tmp_path):
+    import pytest
+    run = CronRun("cron-1", 1, "ok", None, None, None, None, None, None, None, None, None)
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=run):
+        with pytest.raises(ValueError, match="no session ID"):
+            wait_for_transcript(tmp_path, "cron-1", 0)
+
+
+def test_cron_watcher_times_out(tmp_path):
+    import pytest
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=None):
+        with pytest.raises(TimeoutError):
+            wait_for_transcript(tmp_path, "cron-1", 0)
