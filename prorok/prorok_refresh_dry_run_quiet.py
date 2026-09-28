@@ -221,11 +221,7 @@ def main(argv: list[str]) -> int:
     launcher.subprocess.run = quiet_run
     launcher.build_prompt = guarded_build_prompt
     result = launcher.main(argv)
-    if result == 0:
-        if SUMMARY.get("cron_id"):
-            print(f"cron_id: {SUMMARY['cron_id']}")
-        if SUMMARY.get("run_at"):
-            print(f"run_at: {SUMMARY['run_at']}")
+    # The underlying launcher emits validated cron metadata.
     return result
 
 
