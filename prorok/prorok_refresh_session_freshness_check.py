@@ -8,9 +8,27 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import prorok_refresh_collector_v6 as v6
+import prorok_refresh_collector as collector
+
+
+def wait_for_transcript(state_dir: Path, cron_id: str, timeout_seconds: float = 360) -> Path:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        run = collector.find_latest_finished_run(state_dir, cron_id)
+        if run is not None:
+            if run.status != "ok":
+                raise ValueError("cron execution failed")
+            if not run.session_id:
+                raise ValueError("completed cron has no session ID")
+            return collector.resolve_session_transcript_path(state_dir, run.session_id, run.session_key)
+        if time.monotonic() >= deadline:
+            raise TimeoutError("cron completion timed out")
+        time.sleep(2)
+
 
 
 def check_freshness(session_path: Path) -> tuple[bool, str, int]:
@@ -38,11 +56,17 @@ def check_freshness(session_path: Path) -> tuple[bool, str, int]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("session_jsonl", type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--session-jsonl", type=Path)
+    source.add_argument("--cron-id")
+    parser.add_argument("--state-dir", type=Path, default=Path(collector.DEFAULT_STATE_DIR))
+    parser.add_argument("--timeout-seconds", type=float, default=360)
     args = parser.parse_args(argv)
     try:
-        valid, reason, required = check_freshness(args.session_jsonl)
-    except (OSError, ValueError) as exc:
+        path = (wait_for_transcript(args.state_dir, args.cron_id, args.timeout_seconds)
+                if args.cron_id else args.session_jsonl)
+        valid, reason, required = check_freshness(path)
+    except (OSError, ValueError, TimeoutError) as exc:
         print(f"freshness_check: FAIL; unreadable transcript: {type(exc).__name__}", file=sys.stderr)
         return 2
     print(f"freshness_check: {'PASS' if valid else 'FAIL'}")
