@@ -21,8 +21,19 @@ def wait_for_transcript(
 ) -> Path:
     deadline = time.monotonic() + timeout_seconds
     while True:
-        run = collector.find_latest_finished_run(state_dir, cron_id)
-        if run is not None and (min_run_at_ms is None or run.run_at_ms >= min_run_at_ms) and (expected_session_id is None or run.session_id == expected_session_id):
+        matching_runs = []
+        history = state_dir / "cron" / "runs" / f"{cron_id}.jsonl"
+        for item in collector.read_jsonl(history):
+            candidate = collector.parse_cron_run(cron_id, item)
+            if candidate is None:
+                continue
+            if min_run_at_ms is not None and candidate.run_at_ms < min_run_at_ms:
+                continue
+            if expected_session_id is not None and candidate.session_id != expected_session_id:
+                continue
+            matching_runs.append(candidate)
+        run = max(matching_runs, key=lambda item: item.run_at_ms, default=None)
+        if run is not None:
             if run.status != "ok":
                 raise ValueError("cron execution failed")
             if not run.session_id:
