@@ -18,14 +18,17 @@ import json
 import argparse
 import sqlite3
 import subprocess
+import time
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from .prorok_standalone_freshness_registry import DEFAULT_REGISTRY, register_job
     from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
 except ImportError:  # direct script execution from /app/prorok
+    from prorok_standalone_freshness_registry import DEFAULT_REGISTRY, register_job
     from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
 
 
@@ -343,6 +346,7 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
             ]
         )
     cmd.append("--json")
+    created_at_ms = int(time.time() * 1000)
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     try:
         payload = json.loads(result.stdout)
@@ -352,6 +356,20 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
         raise RuntimeError("OpenClaw cron add returned invalid JSON") from exc
     if not isinstance(cron_id, str) or not cron_id.strip():
         raise RuntimeError("OpenClaw cron add returned no cron ID")
+    if not args.no_deliver:
+        try:
+            expected_run_at_ms = int(run_at) if run_at is not None else None
+            register_job(
+                Path(getattr(args, "freshness_registry", DEFAULT_REGISTRY)),
+                cron_id=cron_id, event_id=args.event_id,
+                chat_id=args.to, thread_id=str(args.thread_id),
+                created_at_ms=created_at_ms,
+                expected_run_at_ms=expected_run_at_ms,
+            )
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"cron {cron_id} was created but freshness registration failed"
+            ) from exc
     print(f"cron_id: {cron_id}")
     if run_at is not None:
         print(f"run_at: {run_at}")
@@ -370,6 +388,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--agent", default="main", help="OpenClaw agent id")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=DEFAULT_TOOLS, help="Tool allow-list for the agent job")
+    parser.add_argument("--freshness-registry", type=Path, default=DEFAULT_REGISTRY,
+                        help="Standalone freshness registry (not used for --no-deliver)")
     parser.add_argument("--no-deliver", action="store_true", help="Create the one-shot job without Telegram delivery")
     parser.add_argument("--no-schedule", action="store_true", help="Only write the prompt file; do not create cron job")
     parser.add_argument("--evidence-limit", type=int, default=12, help="Number of latest evidence rows to include")
