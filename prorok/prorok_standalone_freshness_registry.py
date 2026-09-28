@@ -32,6 +32,12 @@ def record_result(path: Path, *, cron_id: str, status: str, reason: str, require
                          "status": status, "reason": reason, "required": required})
 
 
+def record_delivery(path: Path, *, cron_id: str, status: str) -> None:
+    if not cron_id or status not in {"sent", "failed"}:
+        raise ValueError("invalid freshness delivery status")
+    append_record(path, {"kind": "delivery", "cron_id": cron_id, "status": status})
+
+
 def register_job(path: Path, *, cron_id: str, event_id: str,
                  chat_id: str, thread_id: str, created_at_ms: int,
                  expected_run_at_ms: int | None = None) -> dict:
@@ -65,4 +71,6 @@ def registered_jobs(path: Path) -> dict[str, dict]:
                 jobs[item["cron_id"]] = item
             elif item.get("kind") == "result" and item["cron_id"] in jobs:
                 jobs[item["cron_id"]] = {**jobs[item["cron_id"]], "result": item}
+            elif item.get("kind") == "delivery" and item["cron_id"] in jobs:
+                jobs[item["cron_id"]] = {**jobs[item["cron_id"]], "delivery": item}
     return jobs
