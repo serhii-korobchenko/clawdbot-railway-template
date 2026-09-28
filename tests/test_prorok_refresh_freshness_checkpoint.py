@@ -4,7 +4,7 @@ from prorok.prorok_refresh_search_protocol import apply_search_protocol
 
 
 def test_checkpoint_is_after_search_rules_and_before_final_report():
-    prompt = "search_after_at: 2026-09-26T05:25:09Z\\n\\nФормат фінальної відповіді:\\nPROROK_REFRESH_DRY_RUN"
+    prompt = "search_after_at: 2026-09-26T05:25:09Z\n\nФормат фінальної відповіді:\nPROROK_REFRESH_DRY_RUN"
     result = apply_search_protocol(prompt)
     assert result.index("13. Mandatory search protocol") < result.index("14. Mandatory pre-report freshness checkpoint")
     assert result.index("14. Mandatory pre-report freshness checkpoint") < result.index("Формат фінальної відповіді:")
@@ -15,7 +15,7 @@ def test_checkpoint_is_after_search_rules_and_before_final_report():
 
 
 def test_protocol_injection_is_idempotent():
-    prompt = "search_after_at: 2026-09-26T05:25:09Z\\n\\nФормат фінальної відповіді:"
+    prompt = "search_after_at: 2026-09-26T05:25:09Z\n\nФормат фінальної відповіді:"
     once = apply_search_protocol(prompt)
     assert apply_search_protocol(once) == once
     assert once.count("14. Mandatory pre-report freshness checkpoint") == 1
