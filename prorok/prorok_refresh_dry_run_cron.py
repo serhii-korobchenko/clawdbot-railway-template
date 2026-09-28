@@ -13,6 +13,8 @@ required before any evidence or assessment changes are applied.
 
 from __future__ import annotations
 
+import json
+
 import argparse
 import sqlite3
 import subprocess
@@ -340,7 +342,19 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
                 str(args.thread_id),
             ]
         )
-    subprocess.run(cmd, check=True)
+    cmd.append("--json")
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        payload = json.loads(result.stdout)
+        cron_id = payload.get("id") or payload.get("job", {}).get("id")
+        run_at = payload.get("state", {}).get("nextRunAtMs") or payload.get("job", {}).get("state", {}).get("nextRunAtMs")
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise RuntimeError("OpenClaw cron add returned invalid JSON") from exc
+    if not isinstance(cron_id, str) or not cron_id.strip():
+        raise RuntimeError("OpenClaw cron add returned no cron ID")
+    print(f"cron_id: {cron_id}")
+    if run_at is not None:
+        print(f"run_at: {run_at}")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
