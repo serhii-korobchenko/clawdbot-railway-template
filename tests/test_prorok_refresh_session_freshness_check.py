@@ -77,3 +77,27 @@ def test_cron_watcher_times_out(tmp_path):
     with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=None):
         with pytest.raises(TimeoutError):
             wait_for_transcript(tmp_path, "cron-1", 0)
+
+
+def test_cron_watcher_ignores_stale_finished_run(tmp_path):
+    import pytest
+    old = CronRun("cron-1", 100, "ok", "old-session", None, None, None, None, None, None, None)
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=old), patch("prorok_refresh_session_freshness_check.collector.resolve_session_transcript_path") as resolve:
+        with pytest.raises(TimeoutError):
+            wait_for_transcript(tmp_path, "cron-1", 0, min_run_at_ms=101)
+        resolve.assert_not_called()
+
+
+def test_cron_watcher_rejects_wrong_session(tmp_path):
+    import pytest
+    other = CronRun("cron-1", 200, "ok", "other-session", None, None, None, None, None, None, None)
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=other):
+        with pytest.raises(TimeoutError):
+            wait_for_transcript(tmp_path, "cron-1", 0, expected_session_id="target-session")
+
+
+def test_cron_watcher_accepts_matching_run_boundary(tmp_path):
+    run = CronRun("cron-1", 200, "ok", "target-session", None, None, None, None, None, None, None)
+    expected = tmp_path / "session.jsonl"
+    with patch("prorok_refresh_session_freshness_check.collector.find_latest_finished_run", return_value=run), patch("prorok_refresh_session_freshness_check.collector.resolve_session_transcript_path", return_value=expected):
+        assert wait_for_transcript(tmp_path, "cron-1", 0, min_run_at_ms=200, expected_session_id="target-session") == expected
