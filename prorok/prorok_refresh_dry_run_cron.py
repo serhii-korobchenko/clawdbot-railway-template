@@ -385,7 +385,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--to", default=DEFAULT_CHAT_ID, help="Telegram chat id for delivery")
     parser.add_argument("--thread-id", default=DEFAULT_THREAD_ID, help="Telegram forum topic thread id")
     parser.add_argument("--at", default=DEFAULT_AT, help="One-shot schedule, for example 2m")
-    parser.add_argument("--agent", default="main", help="OpenClaw agent id")
+    parser.add_argument("--agent", default="prorok-refresh", help="OpenClaw agent id")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=DEFAULT_TOOLS, help="Tool allow-list for the agent job")
     parser.add_argument("--freshness-registry", type=Path, default=DEFAULT_REGISTRY,
