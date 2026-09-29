@@ -37,9 +37,23 @@ def make_v9_db(path: Path) -> None:
             title TEXT NOT NULL,
             status TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            archived_at TEXT
+            archived_at TEXT,
+            question TEXT NOT NULL DEFAULT 'Will this happen?',
+            forecast_horizon TEXT DEFAULT '2026-12-31',
+            decision_criteria TEXT DEFAULT 'Resolution criteria'
         );
 
+        CREATE TABLE runs(
+            run_id INTEGER PRIMARY KEY AUTOINCREMENT, run_type TEXT,
+            status TEXT, notes TEXT, finished_at TEXT, events_processed INTEGER
+        );
+        CREATE TABLE assessments(
+            assessment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT, run_id INTEGER, assessed_at TEXT,
+            probability_percent INTEGER, probability_band TEXT,
+            probability_label TEXT, confidence TEXT,
+            delta_from_previous INTEGER, rationale TEXT
+        );
         CREATE TABLE event_status_audit (
             status_change_id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id_snapshot TEXT NOT NULL,
@@ -102,7 +116,6 @@ def audit_count(db: Path, event_id: str) -> int:
     ("event_id", "from_status", "to_status"),
     [
         ("active_event", "active", "paused"),
-        ("paused_event", "paused", "active"),
         ("active_event", "active", "archived"),
         ("paused_event", "paused", "archived"),
         ("archived_event", "archived", "active"),
@@ -210,3 +223,62 @@ def test_requires_schema_v9(tmp_path: Path) -> None:
 
     assert read_event(db, "active_event")["status"] == "active"
     assert audit_count(db, "active_event") == 0
+
+
+
+def resume_args(db: Path, probability: int = 25) -> Namespace:
+    return Namespace(db=str(db), event_id="paused_event", probability=probability,
+                     confidence="medium", rationale="User reviewed the evidence",
+                     source="telegram", actor="telegram:123")
+
+
+def test_direct_pause_to_active_requires_assessment(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    make_v9_db(db)
+    cli = load_cli()
+    with pytest.raises(cli.CliError, match="unsupported status transition"):
+        cli.cmd_set_status(args(db, "paused_event", "paused", "active"))
+    assert read_event(db, "paused_event")["status"] == "paused"
+
+
+def test_resume_atomically_creates_assessment_and_audit(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    make_v9_db(db)
+    cli = load_cli()
+    assert cli.cmd_resume_with_assessment(resume_args(db)) == 0
+    assert read_event(db, "paused_event")["status"] == "active"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT probability_percent, confidence FROM assessments").fetchone() == (25, "medium")
+        assert conn.execute("SELECT from_status, to_status FROM event_status_audit").fetchone() == ("paused", "active")
+        assert conn.execute("SELECT status FROM runs").fetchone()[0] == "completed"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert audit_count(db, "paused_event") == 1
+    with pytest.raises(cli.CliError, match="requires paused"):
+        cli.cmd_resume_with_assessment(resume_args(db))
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0] == 1
+
+
+def test_resume_validation_and_rollback(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    make_v9_db(db)
+    cli = load_cli()
+    with pytest.raises(cli.CliError, match="increments of 5"):
+        cli.cmd_resume_with_assessment(resume_args(db, 23))
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE events SET forecast_horizon = NULL WHERE event_id = 'paused_event'")
+        conn.commit()
+    with pytest.raises(cli.CliError, match="forecast_horizon"):
+        cli.cmd_resume_with_assessment(resume_args(db))
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE events SET forecast_horizon = '2026-12-31' WHERE event_id = 'paused_event'")
+        conn.commit()
+    def fail_integrity(_conn):
+        raise cli.CliError("forced integrity failure")
+    cli.validate_integrity = fail_integrity
+    with pytest.raises(cli.CliError, match="forced integrity failure"):
+        cli.cmd_resume_with_assessment(resume_args(db))
+    assert read_event(db, "paused_event")["status"] == "paused"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM event_status_audit").fetchone()[0] == 0
