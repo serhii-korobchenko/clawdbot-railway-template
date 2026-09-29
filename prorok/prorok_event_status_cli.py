@@ -22,7 +22,6 @@ TARGET_STATUSES = ("active", "paused", "archived")
 SOURCE_CHOICES = ("telegram", "manual_cli", "system")
 ALLOWED_TRANSITIONS = {
     ("active", "paused"),
-    ("paused", "active"),
     ("active", "archived"),
     ("paused", "archived"),
     ("archived", "active"),
@@ -216,6 +215,69 @@ def cmd_set_status(args: argparse.Namespace) -> int:
     return 0
 
 
+
+PROBABILITY_BANDS = (
+    (5, "0-5%", "Віддалена можливість"),
+    (20, "10-20%", "Ймовірність низька"),
+    (35, "25-35%", "Малоймовірно"),
+    (50, "40-50%", "Реалістична можливість"),
+    (75, "55-75%", "Ймовірно"),
+    (90, "80-90%", "Висока ймовірність"),
+    (100, "95-100%", "Майже напевно"),
+)
+
+
+def cmd_resume_with_assessment(args: argparse.Namespace) -> int:
+    value = args.probability
+    if value not in range(0, 101, 5):
+        raise CliError("probability must be 0..100 in increments of 5")
+    if not (args.rationale or "").strip():
+        raise CliError("rationale cannot be empty")
+    band, label = next((band, label) for ceiling, band, label in PROBABILITY_BANDS if value <= ceiling)
+    db = resolve_db(args.db)
+    with connect(db) as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            require_schema_v9(conn)
+            event = fetch_one(conn, "SELECT * FROM events WHERE event_id = ?", (args.event_id,))
+            if event is None:
+                raise CliError("event not found")
+            if event["status"] != "paused":
+                raise CliError("resume requires paused status")
+            for field in ("title", "question", "forecast_horizon", "decision_criteria"):
+                if not str(event[field] or "").strip():
+                    raise CliError("resume requires " + field)
+            previous = fetch_one(conn, "SELECT probability_percent FROM assessments WHERE event_id = ? ORDER BY assessed_at DESC, assessment_id DESC LIMIT 1", (args.event_id,))
+            delta = None if previous is None else value - int(previous["probability_percent"])
+            now = utc_now()
+            run_id = conn.execute("INSERT INTO runs(run_type, status, notes) VALUES ('manual_cli', 'running', ?)", ("Telegram resume assessment",)).lastrowid
+            assessment_id = conn.execute(
+                "INSERT INTO assessments(event_id, run_id, assessed_at, probability_percent, probability_band, probability_label, confidence, delta_from_previous, rationale) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (args.event_id, run_id, now, value, band, label, args.confidence, delta, args.rationale.strip()),
+            ).lastrowid
+            status_change_id = conn.execute(
+                "INSERT INTO event_status_audit(event_id_snapshot, title_snapshot, from_status, to_status, decision_source, actor_snapshot, changed_at) VALUES (?, ?, 'paused', 'active', ?, ?, ?)",
+                (args.event_id, event["title"], args.source, args.actor, now),
+            ).lastrowid
+            changed = conn.execute("UPDATE events SET status = 'active', archived_at = NULL, updated_at = ? WHERE event_id = ? AND status = 'paused'", (now, args.event_id))
+            if changed.rowcount != 1:
+                raise CliError("concurrent status change")
+            conn.execute("UPDATE runs SET status = 'completed', finished_at = ?, events_processed = 1 WHERE run_id = ?", (now, run_id))
+            validate_integrity(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    print("OK: resumed with official assessment")
+    print("assessment_id:", assessment_id)
+    print("status_change_id:", status_change_id)
+    print("probability:", value)
+    print("from_status: paused")
+    print("to_status: active")
+    print("atomic_commit: true")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Deterministically change a PROROK event lifecycle status"
@@ -230,6 +292,15 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--source", default="telegram", choices=SOURCE_CHOICES)
     command.add_argument("--actor")
     command.set_defaults(func=cmd_set_status)
+
+    resume = sub.add_parser("resume-with-assessment")
+    resume.add_argument("event_id")
+    resume.add_argument("--probability", type=int, required=True)
+    resume.add_argument("--confidence", choices=("low", "medium", "high"), required=True)
+    resume.add_argument("--rationale", required=True)
+    resume.add_argument("--source", default="telegram", choices=SOURCE_CHOICES)
+    resume.add_argument("--actor")
+    resume.set_defaults(func=cmd_resume_with_assessment)
     return parser
 
 
