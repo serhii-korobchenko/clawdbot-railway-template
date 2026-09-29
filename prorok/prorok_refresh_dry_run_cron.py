@@ -181,6 +181,7 @@ def build_prompt(
 - НЕ запускай /prorok assess.
 - НЕ вигадуй URL.
 - Для пошуку використовуй тільки tavily_search. tavily_extract і web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; web_search для PROROK refresh не використовуй.
+- Обов'язковий freshness verification gate: після ПЕРШИХ ТРЬОХ викликів tavily_search переглянь їхні results у порядку видачі. Для кожного пошуку візьми до 3 результатів із непорожнім URL, але без непорожнього поля published; для кожного такого URL ПІСЛЯ відповідного пошуку виклич tavily_extract(urls=[...]) або web_fetch(url=...). Повторний tavily_search не замінює verification. Виконай ці виклики навіть якщо зрештою повернеш NO_NEW_EVIDENCE_FOUND; не пропускай їх через низьку релевантність джерела. Не вигадуй published, а недоступні для перевірки джерела не включай до candidate evidence.
 - Поверни тільки фінальний structured report українською мовою.
 
 Подія:
