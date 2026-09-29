@@ -244,7 +244,7 @@ async function eventPresentation(eventId) {
       buttonsBlock([
         button(
           statusTransitionLabel(event.status, toStatus),
-          `status:${token}:${event.status}:${toStatus}`,
+          event.status === "paused" && toStatus === "active" ? `resume:${token}` : `status:${token}:${event.status}:${toStatus}`,
           style,
         ),
       ]),
@@ -803,10 +803,105 @@ async function loadEvidenceForDeletion(eventId, evidenceId) {
   return { data, event, item };
 }
 
+
+const RESUME_REASONS = {
+  initial: "Початкова оцінка користувача після аналізу опису події.",
+  evidence: "Оцінка користувача на основі доступних evidence.",
+  revised: "Переглянута оцінка користувача з урахуванням попереднього прогнозу.",
+};
+function parseResumeRoute(payload, prefix, count) {
+  const parts = payload.slice(prefix.length).split(":");
+  if (parts.length !== count || !/^[a-f0-9]{12}$/.test(parts[0])) throw new Error("Invalid resume callback");
+  const probability = count > 1 ? Number(parts[1]) : null;
+  if (count > 1 && (!/^\d+$/.test(parts[1]) || !CUSTOM_PROBABILITY_VALUES.includes(probability))) throw new Error("Invalid resume probability");
+  if (count > 2 && !["low", "medium", "high"].includes(parts[2])) throw new Error("Invalid resume confidence");
+  if (count > 3 && !Object.hasOwn(RESUME_REASONS, parts[3])) throw new Error("Invalid resume rationale");
+  return { token: parts[0], probability, confidence: parts[2], reason: parts[3] };
+}
+async function resumeEventData(eventId) {
+  const data = await apiGet("/api/v1/events/" + encodeURIComponent(eventId));
+  const event = data.event;
+  if (event.status !== "paused") return { event, data, problem: "Подія вже не має статусу paused. Жодних змін не виконано." };
+  const missing = ["title", "question", "forecast_horizon", "decision_criteria"].filter((key) => !String(event[key] || "").trim());
+  if (missing.length) return { event, data, problem: "Доповніть дані перед активацією: " + missing.join(", ") };
+  return { event, data, problem: null };
+}
+function blockedResume(event, problem) {
+  return { title: "PROROK · Відновлення недоступне", tone: "neutral",
+    blocks: [textBlock(problem), buttonsBlock([button("◀️ До події", "event-any:" + eventToken(event.event_id))])] };
+}
+async function resumeProbabilityPresentation(eventId) {
+  const { event, problem } = await resumeEventData(eventId);
+  if (problem) return blockedResume(event, problem);
+  const token = eventToken(eventId);
+  const blocks = [textBlock("Оберіть official probability. Подія залишиться paused до остаточного підтвердження.")];
+  for (let i = 0; i < CUSTOM_PROBABILITY_VALUES.length; i += 3) {
+    blocks.push(buttonsBlock(CUSTOM_PROBABILITY_VALUES.slice(i, i + 3).map((value) =>
+      button(value + "%", "resume-prob:" + token + ":" + value))));
+  }
+  blocks.push(buttonsBlock([button("❌ Скасувати", "event-any:" + token)]));
+  return { title: "▶️ PROROK · Відновлення", tone: "neutral", blocks };
+}
+async function resumeConfidencePresentation(eventId, probability) {
+  const { event, problem } = await resumeEventData(eventId);
+  if (problem) return blockedResume(event, problem);
+  const token = eventToken(eventId);
+  return { title: "PROROK · Confidence", tone: "neutral",
+    blocks: [textBlock("Ймовірність: " + probability + "%. Оберіть впевненість."),
+      buttonsBlock(["low", "medium", "high"].map((c) => button(c, "resume-conf:" + token + ":" + probability + ":" + c))),
+      buttonsBlock([button("◀️ Назад", "resume:" + token)])] };
+}
+async function resumeReasonPresentation(eventId, probability, confidence) {
+  const { event, problem } = await resumeEventData(eventId);
+  if (problem) return blockedResume(event, problem);
+  const token = eventToken(eventId);
+  return { title: "PROROK · Обґрунтування", tone: "neutral",
+    blocks: [textBlock("Ймовірність: " + probability + "%; confidence: " + confidence + ". Оберіть підставу оцінки."),
+      ...Object.entries(RESUME_REASONS).map(([key, value]) =>
+        buttonsBlock([button(value, "resume-reason:" + token + ":" + probability + ":" + confidence + ":" + key)])),
+      buttonsBlock([button("◀️ Назад", "resume-prob:" + token + ":" + probability)])] };
+}
+async function resumeConfirmPresentation(eventId, probability, confidence, reason) {
+  const { event, data, problem } = await resumeEventData(eventId);
+  if (problem) return blockedResume(event, problem);
+  const token = eventToken(eventId);
+  const previous = data.current_assessment?.probability_percent;
+  return { title: "PROROK · Підтвердити відновлення", tone: "neutral",
+    blocks: [textBlock("Подія: " + event.title + "\nСтатус: paused → active\nПопередня оцінка: " +
+      (previous ?? "немає") + "%\nНова оцінка: " + probability + "%\nConfidence: " + confidence +
+      "\nПідстава: " + RESUME_REASONS[reason] + "\nAssessment, status audit і активація будуть записані атомарно."),
+      buttonsBlock([button("✅ Підтвердити та активувати", "resume-apply:" + token + ":" + probability + ":" + confidence + ":" + reason, "success")]),
+      buttonsBlock([button("◀️ Змінити", "resume-conf:" + token + ":" + probability + ":" + confidence),
+        button("❌ Скасувати", "event-any:" + token)])] };
+}
+async function appliedResumePresentation(eventId, probability, confidence, reason, ctx) {
+  const { event, problem } = await resumeEventData(eventId);
+  if (problem) return blockedResume(event, problem);
+  const token = eventToken(eventId);
+  try {
+    const { stdout } = await execFileAsync(PYTHON_BIN,
+      [STATUS_CLI, "--db", PROROK_DB_PATH, "resume-with-assessment", eventId,
+        "--probability", String(probability), "--confidence", confidence,
+        "--rationale", RESUME_REASONS[reason], "--source", "telegram",
+        "--actor", telegramActorSnapshot(ctx)],
+      { timeout: 20000, maxBuffer: 64 * 1024, env: process.env });
+    const fields = parseCliKeyValues(stdout);
+    return { title: "✅ PROROK · Подію відновлено", tone: "neutral",
+      blocks: [textBlock("Статус: active\nOfficial probability: " + probability +
+        "%\nAssessment: #" + fields.assessment_id + "\nStatus audit: #" + fields.status_change_id),
+        buttonsBlock([button("◀️ До події", "event-any:" + token, "primary")])] };
+  } catch (error) {
+    return { title: "PROROK · Відновлення не виконано", tone: "neutral",
+      blocks: [textBlock("Операцію відхилено. " + decisionErrorText(error)),
+        buttonsBlock([button("◀️ До події", "event-any:" + token)])] };
+  }
+}
+
 async function statusConfirmationPresentation(eventId, expectedStatus, targetStatus) {
   const data = await apiGet(`/api/v1/events/${encodeURIComponent(eventId)}`);
   const event = data.event;
   const token = eventToken(event.event_id);
+  if (expectedStatus === "paused" && targetStatus === "active") return await resumeProbabilityPresentation(eventId);
 
   if (event.status !== expectedStatus) {
     return {
@@ -864,6 +959,7 @@ async function statusConfirmationPresentation(eventId, expectedStatus, targetSta
 }
 
 async function appliedStatusPresentation(eventId, expectedStatus, targetStatus, ctx) {
+  if (expectedStatus === "paused" && targetStatus === "active") return await resumeProbabilityPresentation(eventId);
   const token = eventToken(eventId);
   const actor = telegramActorSnapshot(ctx);
 
@@ -2273,6 +2369,26 @@ async function renderPayload(payload, ctx = null) {
     const [, filter = "all", rawPage = "0"] = payload.split(":");
     const safeFilter = ["all", "indicator", "counterindicator"].includes(filter) ? filter : "all";
     return await globalEvidencePresentation(safeFilter, Number.parseInt(rawPage, 10) || 0);
+  }
+  if (payload.startsWith("resume-apply:")) {
+    const r = parseResumeRoute(payload, "resume-apply:", 4);
+    return await appliedResumePresentation(await resolveEventId(r.token), r.probability, r.confidence, r.reason, ctx);
+  }
+  if (payload.startsWith("resume-reason:")) {
+    const r = parseResumeRoute(payload, "resume-reason:", 4);
+    return await resumeConfirmPresentation(await resolveEventId(r.token), r.probability, r.confidence, r.reason);
+  }
+  if (payload.startsWith("resume-conf:")) {
+    const r = parseResumeRoute(payload, "resume-conf:", 3);
+    return await resumeReasonPresentation(await resolveEventId(r.token), r.probability, r.confidence);
+  }
+  if (payload.startsWith("resume-prob:")) {
+    const r = parseResumeRoute(payload, "resume-prob:", 2);
+    return await resumeConfidencePresentation(await resolveEventId(r.token), r.probability);
+  }
+  if (payload.startsWith("resume:")) {
+    const r = parseResumeRoute(payload, "resume:", 1);
+    return await resumeProbabilityPresentation(await resolveEventId(r.token));
   }
   if (payload.startsWith("status-apply:")) {
     const { token, fromStatus, toStatus } = parseStatusRoute(payload, "status-apply:");
