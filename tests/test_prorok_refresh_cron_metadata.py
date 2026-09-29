@@ -20,6 +20,11 @@ def args():
         to="chat", thread_id="112")
 
 
+def test_launcher_defaults_to_dedicated_prorok_agent():
+    assert launcher.parse_args(["event-test"]).agent == "prorok-refresh"
+    assert launcher.parse_args(["event-test", "--agent", "main"]).agent == "main"
+
+
 def test_launcher_emits_validated_cron_metadata(capsys):
     payload = {"id": "cron-123", "state": {"nextRunAtMs": 123456}}
     with patch.object(launcher.subprocess, "run", return_value=subprocess.CompletedProcess(
