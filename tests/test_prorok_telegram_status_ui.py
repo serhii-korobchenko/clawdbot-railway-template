@@ -47,3 +47,19 @@ def test_evidence_recommendation_cli_supports_json_output():
     source=(Path(__file__).resolve().parent.parent/"prorok"/"prorok_evidence_recommendation_cli.py").read_text(encoding="utf-8")
     assert '"--output-json"' in source
     assert "evidence_assessment_recommendation_id" in source
+
+
+
+def test_paused_resume_requires_probability_confidence_reason_and_atomic_cli() -> None:
+    source = PLUGIN.read_text(encoding="utf-8")
+    assert 'resumeProbabilityPresentation' in source
+    assert 'resumeConfidencePresentation' in source
+    assert 'resumeReasonPresentation' in source
+    assert 'resumeConfirmPresentation' in source
+    assert 'appliedResumePresentation' in source
+    assert '"resume-with-assessment"' in source
+    assert 'resume-apply:' in source
+    assert 'resume-prob:' in source
+    assert 'resume-conf:' in source
+    assert 'resume-reason:' in source
+    assert 'if (expectedStatus === "paused" && targetStatus === "active") return await resumeProbabilityPresentation(eventId);' in source
