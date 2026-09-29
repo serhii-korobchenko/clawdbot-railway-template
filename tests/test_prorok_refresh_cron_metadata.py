@@ -106,3 +106,17 @@ def test_registration_failure_reports_created_cron(tmp_path):
     )), patch.object(launcher, "register_job", side_effect=OSError("disk error")):
         with pytest.raises(RuntimeError, match="cron cron-created was created"):
             launcher.schedule_cron(job_args, "prompt")
+
+
+def test_prompt_requires_post_search_verification_of_undated_urls_even_without_evidence():
+    event = launcher.EventState("event-test", "Title", "Question", "2026-12-31", "active", "Criteria", "")
+    prompt = launcher.build_prompt(event, launcher.AssessmentState(), [], "2026-09-29T06:00:00Z")
+    assert "ПЕРШИХ ТРЬОХ викликів tavily_search" in prompt
+    assert "до 3 результатів" in prompt
+    assert "published" in prompt
+    assert "tavily_extract(urls=[...])" in prompt
+    assert "web_fetch(url=...)" in prompt
+    assert "ПІСЛЯ відповідного пошуку" in prompt
+    assert "Повторний tavily_search не замінює verification" in prompt
+    assert "NO_NEW_EVIDENCE_FOUND" in prompt
+    assert "не пропускай їх через низьку релевантність" in prompt
