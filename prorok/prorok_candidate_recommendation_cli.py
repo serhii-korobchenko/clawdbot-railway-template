@@ -105,9 +105,15 @@ def build_prompt(ctx: official.RecommendationContext, candidate_id: int) -> str:
         "Analyze ONLY the supplied official evidence in the context of the event and current baseline.",
         "Analyze ONLY the supplied Candidate Evidence in the context of the event and current baseline. The Candidate is quarantined and is NOT official evidence.",
     ).replace("OFFICIAL EVIDENCE", "CANDIDATE EVIDENCE")
-    prompt = prompt.replace(f"evidence_id: {candidate_id}", f"candidate_id: {candidate_id}")
-    prompt = prompt.replace("event_id, evidence_id, baseline_assessment_id, baseline_probability,", "event_id, evidence_id, baseline_assessment_id, baseline_probability,")
-    prompt += "\nFor parser compatibility, return evidence_id equal to candidate_id. This does not make the Candidate official evidence.\n"
+    prompt = prompt.replace(
+        f"evidence_id: {candidate_id}",
+        f"evidence_id: {candidate_id}\ncandidate_id: {candidate_id}",
+    )
+    prompt += (
+        "\nIMPORTANT SCHEMA COMPATIBILITY: evidence_id is a required integer field in the output schema. "
+        "For this Candidate-only recommendation, evidence_id MUST equal candidate_id. "
+        "This compatibility alias does not make the Candidate official evidence.\n"
+    )
     return prompt
 
 
