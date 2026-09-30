@@ -26,7 +26,11 @@ def test_candidate_context_uses_event_and_current_baseline(tmp_path):
     db=tmp_path/'d.sqlite'; make_db(db); m=load('prorok/prorok_candidate_recommendation_cli.py','cr1')
     with m.official.connect(db) as c:
         x=m.load_context(c,7); assert (x.event_id,x.evidence_id,x.baseline_assessment_id,x.baseline_probability)==('event-a',7,1,35)
-        p=m.build_prompt(x,7); assert 'Candidate Evidence' in p and 'NOT official evidence' in p
+        p=m.build_prompt(x,7)
+        assert 'Candidate Evidence' in p and 'NOT official evidence' in p
+        assert 'evidence_id: 7' in p
+        assert 'candidate_id: 7' in p
+        assert 'evidence_id MUST equal candidate_id' in p
 
 def test_persist_candidate_recommendation_only(tmp_path):
     db=tmp_path/'d.sqlite'; make_db(db); m=load('prorok/prorok_candidate_recommendation_cli.py','cr2')
@@ -51,3 +55,16 @@ def test_nonaccepted_candidate_is_blocked(tmp_path):
         try: m.load_context(c,7)
         except m.CliError as e: assert 'not quarantine-accepted' in str(e)
         else: raise AssertionError('unvalidated candidate accepted')
+
+
+def test_candidate_prompt_schema_alias_round_trips_parser(tmp_path):
+    db=tmp_path/'d.sqlite'; make_db(db); m=load('prorok/prorok_candidate_recommendation_cli.py','cr5')
+    with m.official.connect(db) as c:
+        ctx=m.load_context(c,7)
+        p=m.build_prompt(ctx,7)
+        assert 'Return ONLY one JSON object with exactly these keys:' in p
+        assert 'event_id, evidence_id, baseline_assessment_id, baseline_probability,' in p
+        rid=m.persist_report(c,ctx,7,report(),agent_id='pytest')
+        row=c.execute('SELECT candidate_id,recommended_probability,status FROM candidate_assessment_recommendations WHERE candidate_assessment_recommendation_id=?',(rid,)).fetchone()
+        assert tuple(row)==(7,40,'ready')
+        assert c.execute("SELECT COUNT(*) FROM assessments").fetchone()[0]==1
