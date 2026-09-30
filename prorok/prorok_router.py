@@ -143,12 +143,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand in {"refresh", "dry-run", "refresh-dry-run"}:
         if not require_args(rest, "Missing event_id. Usage: /prorok refresh <event_id>"):
             return 2
-        quiet = code_dir / "prorok_refresh_dry_run_quiet.py"
-        script = quiet if quiet.exists() else code_dir / "prorok_refresh_dry_run_cron.py"
-        if not script.exists():
-            print(f"PROROK refresh launcher is not available: {script}", file=sys.stderr)
+        lifecycle = code_dir / "prorok_refresh_one_lifecycle.py"
+        if not lifecycle.exists():
+            print(f"PROROK single-event lifecycle launcher is not available: {lifecycle}", file=sys.stderr)
             return 2
-        return run_plain_python(script, rest)
+        return run_plain_python(lifecycle, ["--trigger-source", "telegram", *rest])
     if subcommand in {"add-event", "create-event", "event-add"}:
         if not rest:
             print("Missing add-event arguments.", file=sys.stderr)

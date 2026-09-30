@@ -3,7 +3,8 @@
 
 The launcher reads the current event, latest assessment, and recent evidence from the
 PROROK SQLite database, builds a structured no-write refresh prompt, and schedules a
-one-shot Telegram delivery through `openclaw cron add`.
+one-shot OpenClaw job. Delivery is announced to Telegram by default; callers can use
+`--no-deliver` for silent batch refresh workers.
 
 It intentionally does not write to the PROROK database. The resulting agent job is
 also instructed not to call `/prorok add-evidence` or `/prorok assess`; human review is
@@ -12,13 +13,23 @@ required before any evidence or assessment changes are applied.
 
 from __future__ import annotations
 
+import json
+
 import argparse
 import sqlite3
 import subprocess
+import time
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from .prorok_standalone_freshness_registry import DEFAULT_REGISTRY, register_job
+    from .prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
+except ImportError:  # direct script execution from /app/prorok
+    from prorok_standalone_freshness_registry import DEFAULT_REGISTRY, register_job
+    from prorok_refresh_boundary import latest_safe_refresh_boundary_datetime
 
 
 DEFAULT_DB_PATH = Path("/data/workspace/prorok/prorok.sqlite3")
@@ -27,7 +38,7 @@ DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 DEFAULT_AT = "2m"
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_TOOLS = "tavily_search tavily_extract web_search web_fetch read"
+DEFAULT_TOOLS = "tavily_search tavily_extract web_fetch read"
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,18 @@ def load_latest_assessment(conn: sqlite3.Connection, event_id: str) -> Assessmen
     )
 
 
+def load_search_after_at(
+    conn: sqlite3.Connection,
+    event_id: str,
+    fallback_assessed_at: str,
+) -> str:
+    """Resolve the latest safe refresh boundary, else official assessment time."""
+    boundary = latest_safe_refresh_boundary_datetime(conn, event_id)
+    if boundary is not None:
+        return boundary.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return fallback_assessed_at or "n/a"
+
+
 def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> list[str]:
     rows = conn.execute(
         """
@@ -142,8 +165,14 @@ def load_evidence_lines(conn: sqlite3.Connection, event_id: str, limit: int) -> 
     return lines
 
 
-def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: list[str]) -> str:
+def build_prompt(
+    event: EventState,
+    latest: AssessmentState,
+    evidence_lines: list[str],
+    search_after_at: str | None = None,
+) -> str:
     evidence_text = "\n".join(evidence_lines)
+    search_after = search_after_at or latest.assessed_at or "n/a"
     return f"""Виконай DRY-RUN оновлення PROROK для події {event.event_id}.
 
 ВАЖЛИВО:
@@ -151,7 +180,8 @@ def build_prompt(event: EventState, latest: AssessmentState, evidence_lines: lis
 - НЕ запускай /prorok add-evidence.
 - НЕ запускай /prorok assess.
 - НЕ вигадуй URL.
-- Використовуй web/tavily пошук. Tavily search є основним інструментом; web_search/web_fetch використовуй як fallback.
+- Для пошуку використовуй тільки tavily_search. tavily_extract і web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; web_search для PROROK refresh не використовуй.
+- Обов'язковий freshness verification gate: після ПЕРШИХ ТРЬОХ викликів tavily_search переглянь їхні results у порядку видачі. Для кожного пошуку візьми до 3 результатів із непорожнім URL, але без непорожнього поля published; для кожного такого URL ПІСЛЯ відповідного пошуку виклич tavily_extract(urls=[...]) або web_fetch(url=...). Повторний tavily_search не замінює verification. Виконай ці виклики навіть якщо зрештою повернеш NO_NEW_EVIDENCE_FOUND; не пропускай їх через низьку релевантність джерела. Не вигадуй published, а недоступні для перевірки джерела не включай до candidate evidence.
 - Поверни тільки фінальний structured report українською мовою.
 
 Подія:
@@ -169,13 +199,14 @@ current_band: {latest.band}
 current_label: {latest.label}
 current_confidence: {latest.confidence}
 last_assessed_at: {latest.assessed_at}
+search_after_at: {search_after}
 latest_rationale: {latest.rationale}
 
 Поточний evidence baseline, latest first:
 {evidence_text}
 
 Завдання пошуку:
-1. Знайди тільки нові або суттєво релевантні після last_assessed_at матеріали щодо події.
+1. Знайди тільки нові або суттєво релевантні після search_after_at матеріали щодо події.
 2. Відібери максимум 3 candidate evidence. Краще повернути NO_NEW_EVIDENCE_FOUND, ніж слабкі або дубльовані джерела.
 3. Прийнятні джерела: конкретні статті великих медіа, офіційні заяви/документи урядів або міжнародних організацій, авторитетні think tanks, профільні безпекові інститути.
 4. Заборонено включати як evidence:
@@ -189,13 +220,24 @@ latest_rationale: {latest.rationale}
    - якщо це переказ уже внесеної статті або того самого wire-story, не включай;
    - якщо все ж включаєш старіший матеріал як missed_baseline_evidence, duplicate_risk має бути high і треба чітко пояснити, чому він важливий.
 6. Freshness rule:
-   - за замовчуванням включай тільки матеріали після last_assessed_at;
-   - матеріали до last_assessed_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
-7. Assessment rule:
-   - змінюй recommended_probability тільки якщо є нові сильні або середні evidence, які materially change the balance;
-   - якщо нових якісних evidence немає, поверни change_from_baseline: no_update і recommended_probability: n/a.
+   - за замовчуванням включай тільки матеріали після search_after_at;
+   - матеріали до або на search_after_at включай лише як missed_baseline_evidence, якщо вони істотно змінюють баланс оцінки.
+7. Calibration methodology:
+   - НЕ рахуй evidence арифметично: кількість indicators/counterindicators сама по собі не визначає зміну probability;
+   - спочатку оціни novelty, independence, credibility, relevance, directness до resolution criteria, relevance до forecast horizon, counterevidence та наскільки новий факт already priced into baseline;
+   - кілька джерел про той самий underlying fact рахуй як один інформаційний сигнал;
+   - визнач net_evidence_direction: positive|negative|balanced і net_evidence_impact: none|weak|moderate|strong;
+   - confirmation already-priced information не повинна автоматично підвищувати/знижувати probability;
+   - зміна qualitative band потребує сильнішого обґрунтування, ніж рух усередині band;
+   - допустимі значення probability ТІЛЬКИ: 0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100;
+   - канонічна шкала: 0-5%=Віддалена можливість; 10-20%=Ймовірність низька; 25-35%=Малоймовірно; 40-50%=Реалістична можливість; 55-75%=Ймовірно; 80-90%=Висока ймовірність; 95-100%=Майже напевно;
+   - probability_delta = recommended_probability - baseline_probability;
+   - category_transition=yes тільки якщо recommended_probability переходить в інший band;
+   - delta_justification має пояснити, чому обрано саме це число, а не поточне або сусідній qualitative threshold;
+   - якщо candidate evidence є, але balance materially не змінився, поверни recommended_probability рівним baseline, probability_delta: 0, change_from_baseline: no_update;
+   - якщо нових якісних evidence немає, recommendation/calibration поля, крім confidence/change/rationale, поверни n/a.
 8. Probability wording rule:
-   - не називай band 10-20% “середньою ймовірністю”; це завжди “низька ймовірність”;
+   - band 10-20% завжди має label “Ймовірність низька”;
    - слово medium може стосуватися тільки confidence, strength або quality, але не probability band.
 9. STRICT OUTPUT SCHEMA COMPLIANCE:
    - якщо є candidate evidence, КОЖЕН numbered candidate block ОБОВ'ЯЗКОВО повинен містити рівно всі 12 ключів:
@@ -246,8 +288,14 @@ recommended_probability: <число або n/a>
 recommended_band: <0-5%, 10-20%, 25-35%, 40-50%, 55-75%, 80-90%, 95-100% або n/a>
 recommended_label: <назва зі шкали або n/a>
 confidence: low|medium|high
-change_from_baseline: increase|decrease|keep|no_update
+change_from_baseline: increase|decrease|no_update
+probability_delta: <signed integer або n/a>
+net_evidence_direction: positive|negative|balanced|n/a
+net_evidence_impact: none|weak|moderate|strong|n/a
+baseline_incorporation: low|medium|high|n/a
+category_transition: yes|no|n/a
 rationale: 4-7 речень
+delta_justification: <чому саме це probability, або n/a якщо NO_NEW_EVIDENCE_FOUND>
 
 DB_ACTION:
 do_not_write: true
@@ -283,15 +331,49 @@ def schedule_cron(args: argparse.Namespace, prompt: str) -> None:
         "--tools",
         args.tools,
         "--expect-final",
-        "--announce",
-        "--channel",
-        "telegram",
-        "--to",
-        args.to,
-        "--thread-id",
-        str(args.thread_id),
     ]
-    subprocess.run(cmd, check=True)
+    if args.no_deliver:
+        cmd.append("--no-deliver")
+    else:
+        cmd.extend(
+            [
+                "--announce",
+                "--channel",
+                "telegram",
+                "--to",
+                args.to,
+                "--thread-id",
+                str(args.thread_id),
+            ]
+        )
+    cmd.append("--json")
+    created_at_ms = int(time.time() * 1000)
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        payload = json.loads(result.stdout)
+        cron_id = payload.get("id") or payload.get("job", {}).get("id")
+        run_at = payload.get("state", {}).get("nextRunAtMs") or payload.get("job", {}).get("state", {}).get("nextRunAtMs")
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise RuntimeError("OpenClaw cron add returned invalid JSON") from exc
+    if not isinstance(cron_id, str) or not cron_id.strip():
+        raise RuntimeError("OpenClaw cron add returned no cron ID")
+    if not args.no_deliver:
+        try:
+            expected_run_at_ms = int(run_at) if run_at is not None else None
+            register_job(
+                Path(getattr(args, "freshness_registry", DEFAULT_REGISTRY)),
+                cron_id=cron_id, event_id=args.event_id,
+                chat_id=args.to, thread_id=str(args.thread_id),
+                created_at_ms=created_at_ms,
+                expected_run_at_ms=expected_run_at_ms,
+            )
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"cron {cron_id} was created but freshness registration failed"
+            ) from exc
+    print(f"cron_id: {cron_id}")
+    if run_at is not None:
+        print(f"run_at: {run_at}")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -304,9 +386,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--to", default=DEFAULT_CHAT_ID, help="Telegram chat id for delivery")
     parser.add_argument("--thread-id", default=DEFAULT_THREAD_ID, help="Telegram forum topic thread id")
     parser.add_argument("--at", default=DEFAULT_AT, help="One-shot schedule, for example 2m")
-    parser.add_argument("--agent", default="main", help="OpenClaw agent id")
+    parser.add_argument("--agent", default="prorok-refresh", help="OpenClaw agent id")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--tools", default=DEFAULT_TOOLS, help="Tool allow-list for the agent job")
+    parser.add_argument("--freshness-registry", type=Path, default=DEFAULT_REGISTRY,
+                        help="Standalone freshness registry (not used for --no-deliver)")
+    parser.add_argument("--no-deliver", action="store_true", help="Create the one-shot job without Telegram delivery")
     parser.add_argument("--no-schedule", action="store_true", help="Only write the prompt file; do not create cron job")
     parser.add_argument("--evidence-limit", type=int, default=12, help="Number of latest evidence rows to include")
     return parser.parse_args(argv)
@@ -321,11 +406,12 @@ def main(argv: list[str]) -> int:
     try:
         event = load_event(conn, args.event_id)
         latest = load_latest_assessment(conn, args.event_id)
+        search_after_at = load_search_after_at(conn, args.event_id, latest.assessed_at)
         evidence_lines = load_evidence_lines(conn, args.event_id, args.evidence_limit)
     finally:
         conn.close()
 
-    prompt = build_prompt(event, latest, evidence_lines)
+    prompt = build_prompt(event, latest, evidence_lines, search_after_at)
     prompt_file = write_prompt(prompt_dir, args.event_id, prompt)
     print(f"prompt_file: {prompt_file}")
 
