@@ -3,6 +3,7 @@ set -euo pipefail
 
 python3 - <<'PY'
 import sqlite3
+from collections import Counter
 
 DB = "/data/workspace/prorok/prorok.sqlite3"
 
@@ -52,7 +53,41 @@ try:
         print("Оновлення PROROK ще триває. Підсумковий статус буде доступний після завершення перевірки.")
         raise SystemExit(0)
 
+    candidate_count = 0
+    if latest_refresh_id is not None:
+        candidate_row = conn.execute(
+            """
+            SELECT COUNT(*) AS candidate_count
+            FROM refresh_candidate_evidence rce
+            JOIN refresh_event_results rer
+              ON rer.refresh_event_result_id = rce.refresh_event_result_id
+            WHERE rer.refresh_id = ?
+            """,
+            (latest_refresh_id,),
+        ).fetchone()
+        candidate_count = int(candidate_row["candidate_count"] or 0)
+
     decision_count = 0
+    error_counts = Counter()
+
+    terminal_states = {
+        "completed",
+        "schedule_failed",
+        "execution_failed",
+        "timeout",
+        "source_missing",
+        "parse_failed",
+        "encoding_failed",
+    }
+
+    error_labels = {
+        "schedule_failed": "помилка планування",
+        "execution_failed": "помилка виконання",
+        "timeout": "тайм-аут",
+        "source_missing": "відсутнє джерело результату",
+        "parse_failed": "помилка парсингу",
+        "encoding_failed": "помилка кодування",
+    }
 
     for idx, event in enumerate(events, start=1):
         event_id = event["event_id"]
@@ -89,22 +124,13 @@ try:
             print("")
             continue
 
-        terminal_states = {
-            "completed",
-            "schedule_failed",
-            "execution_failed",
-            "timeout",
-            "source_missing",
-            "parse_failed",
-            "encoding_failed",
-        }
-
         if result["job_state"] not in terminal_states:
             print("   Статус: перевірка ще не завершена")
             print("")
             continue
 
         if result["job_state"] != "completed":
+            error_counts[result["job_state"]] += 1
             print("   Статус: помилка перевірки")
             print("")
             continue
@@ -154,6 +180,24 @@ try:
         f"Потребують рішення: "
         f"{decision_count} із {len(events)}"
     )
+    print(f"Нових кандидатів знайдено: {candidate_count}")
+
+    if error_counts:
+        error_parts = []
+        for state in (
+            "schedule_failed",
+            "execution_failed",
+            "timeout",
+            "source_missing",
+            "parse_failed",
+            "encoding_failed",
+        ):
+            count = error_counts.get(state, 0)
+            if count:
+                error_parts.append(f"{error_labels[state]} — {count}")
+        print("Помилки перевірки: " + "; ".join(error_parts) + ".")
+    else:
+        print("Помилки перевірки: немає.")
 
 finally:
     conn.close()
