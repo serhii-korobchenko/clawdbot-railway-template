@@ -15,16 +15,13 @@ Railway deploy trigger: 2026-08-26T15:57Z.
 
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 from typing import Any
 
 import prorok_refresh_dry_run_cron as launcher
+from prorok_refresh_search_protocol import apply_search_protocol
 
 
-SUMMARY: dict[str, str] = {}
-REAL_RUN = subprocess.run
 REAL_BUILD_PROMPT = launcher.build_prompt
 
 NO_EVIDENCE_REASON = (
@@ -148,7 +145,6 @@ def harden_no_evidence_format(prompt: str) -> str:
     prompt = prompt.replace(reason_placeholder, reason_hardened)
     prompt = prompt.replace(rationale_placeholder, rationale_hardened)
 
-    # Add an extra validation note immediately before the first DB_ACTION in the final format.
     validation_note = (
         "\nNO_NEW_EVIDENCE_VALIDATION:\n"
         f"якщо CANDIDATE_EVIDENCE = NO_NEW_EVIDENCE_FOUND, reason MUST_EQUAL: {NO_EVIDENCE_REASON}\n"
@@ -166,66 +162,21 @@ def guarded_build_prompt(*args: Any, **kwargs: Any) -> str:
     prompt = REAL_BUILD_PROMPT(*args, **kwargs)
     prompt = harden_no_evidence_format(prompt)
     marker = "\nФормат фінальної відповіді:"
-    if NO_NEW_EVIDENCE_GUARD in prompt:
-        return prompt
-    if marker in prompt:
-        return prompt.replace(marker, "\n" + NO_NEW_EVIDENCE_GUARD + marker, 1)
-    return prompt + "\n\n" + NO_NEW_EVIDENCE_GUARD
-
-
-def _extract_summary(stdout: str) -> dict[str, str]:
-    text = (stdout or "").strip()
-    if not text:
-        return {}
-
-    decoder = json.JSONDecoder()
-    data: Any = None
-    for index, char in enumerate(text):
-        if char != "{":
-            continue
-        try:
-            data, _ = decoder.raw_decode(text[index:])
-            break
-        except json.JSONDecodeError:
-            continue
-
-    if not isinstance(data, dict):
-        return {}
-
-    schedule = data.get("schedule")
-    run_at = ""
-    if isinstance(schedule, dict):
-        run_at = str(schedule.get("at") or schedule.get("cron") or "")
-
-    return {
-        "cron_id": str(data.get("id") or ""),
-        "run_at": run_at,
-    }
-
-
-def quiet_run(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
-    if isinstance(cmd, list) and cmd[:3] == ["openclaw", "cron", "add"]:
-        proc = REAL_RUN(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        SUMMARY.update(_extract_summary(proc.stdout or ""))
-        if kwargs.get("check") and proc.returncode != 0:
-            details = (proc.stderr or proc.stdout or "").strip()
-            if details:
-                print(details[-2000:], file=sys.stderr)
-            raise subprocess.CalledProcessError(proc.returncode, cmd, output=proc.stdout, stderr=proc.stderr)
-        return proc
-    return REAL_RUN(cmd, *args, **kwargs)
+    if NO_NEW_EVIDENCE_GUARD not in prompt:
+        if marker in prompt:
+            prompt = prompt.replace(marker, "\n" + NO_NEW_EVIDENCE_GUARD + marker, 1)
+        else:
+            prompt = prompt + "\n\n" + NO_NEW_EVIDENCE_GUARD
+    return apply_search_protocol(prompt)
 
 
 def main(argv: list[str]) -> int:
-    launcher.subprocess.run = quiet_run
-    launcher.build_prompt = guarded_build_prompt
-    result = launcher.main(argv)
-    if result == 0:
-        if SUMMARY.get("cron_id"):
-            print(f"cron_id: {SUMMARY['cron_id']}")
-        if SUMMARY.get("run_at"):
-            print(f"run_at: {SUMMARY['run_at']}")
-    return result
+    previous_prompt = launcher.build_prompt
+    try:
+        launcher.build_prompt = guarded_build_prompt
+        return launcher.main(argv)
+    finally:
+        launcher.build_prompt = previous_prompt
 
 
 if __name__ == "__main__":
