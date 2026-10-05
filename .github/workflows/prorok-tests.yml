@@ -53,4 +53,5 @@ jobs:
             tests/test_prorok_refresh_collector.py \
             tests/test_prorok_refresh_schema_compat.py \
             tests/test_prorok_telegram_status_ui.py \
-            tests/test_prorok_telegram_history_ui.py
+            tests/test_prorok_telegram_history_ui.py \
+            tests/test_prorok_daily_status.py
