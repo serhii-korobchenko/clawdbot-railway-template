@@ -51,6 +51,7 @@ jobs:
             tests/test_prorok_evidence_assessment_recommendation_link.py \
             tests/test_prorok_refresh_parser.py \
             tests/test_prorok_refresh_collector.py \
+            tests/test_prorok_refresh_notifier.py \
             tests/test_prorok_refresh_schema_compat.py \
             tests/test_prorok_telegram_status_ui.py \
             tests/test_prorok_telegram_history_ui.py \
