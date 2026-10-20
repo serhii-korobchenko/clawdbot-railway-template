@@ -9,8 +9,8 @@ def test_checkpoint_is_after_search_rules_and_before_final_report():
     assert result.index("13. Mandatory search protocol") < result.index("14. Mandatory pre-report freshness checkpoint")
     assert result.index("14. Mandatory pre-report freshness checkpoint") < result.index("Формат фінальної відповіді:")
     assert "перші 3 результати" in result
-    assert "перших трьох tavily_search calls" in result
-    assert "tavily_extract (можна batch urls) або web_fetch" in result
+    assert "перших трьох web_search calls" in result
+    assert "виклик web_fetch" in result
     assert "навіть якщо збираєшся повернути NO_NEW_EVIDENCE_FOUND" in result
 
 
