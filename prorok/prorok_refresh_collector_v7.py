@@ -77,7 +77,6 @@ def _retry_parameters_valid(
             f"observed {args.get('count')!r}"
         )
 
-    if 
     actual_date_after = args.get("date_after")
     if expected_date_after is None:
         if actual_date_after not in (None, ""):
@@ -186,7 +185,7 @@ def _evaluate_v7_search_quality(
 
     return (
         True,
-        "ok v7: v6 web_search/freshness rules pass, no Tavily query uses site:, "
+        "ok v7: v6 web_search/freshness rules pass, no web_search query uses site:, "
         f"and zero-result core searches have valid later retries ({len(zero_core)} zero-result core search(es))",
         calls,
     )
@@ -236,7 +235,7 @@ def collect_one_v7(
         return v6.collect_one_v6(conn, state_dir, row)
 
     expected_date_after, search_boundary_at = (
-        v6.v5._expected_tavily_date_after(conn, row)
+        v6.v5._expected_search_date_after(conn, row)
     )
     valid, reason, calls = _evaluate_v7_search_quality(
         session_path,
