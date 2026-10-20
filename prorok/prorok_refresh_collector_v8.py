@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PROROK refresh collector v8 with universal deterministic search-quality gating.
 
-v8 applies the existing v7 deterministic Tavily/search-quality gate to every
+v8 applies the existing v7 deterministic web_search quality gate to every
 successfully parsed refresh result before downstream collection, including
 candidate-positive runs.
 
@@ -34,12 +34,12 @@ COLLECTOR_VERSION = "8"
 
 def _evaluate_v8_search_quality(
     session_path: Path,
-    expected_time_range: str | None,
+    expected_date_after: str | None,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     """Run the v7 deterministic gate for any parsed refresh outcome."""
     valid, v7_reason, calls = v7._evaluate_v7_search_quality(
         session_path,
-        expected_time_range,
+        expected_date_after,
     )
 
     if not valid:
@@ -97,12 +97,12 @@ def collect_one_v8(
         # Preserve the established parser/source failure handling.
         return v7.collect_one_v7(conn, state_dir, row)
 
-    expected_time_range, search_boundary_at = (
-        v7.v6.v5._expected_tavily_time_range(conn, row)
+    expected_date_after, search_boundary_at = (
+        v7.v6.v5._expected_search_date_after(conn, row)
     )
     valid, reason, calls = _evaluate_v8_search_quality(
         session_path,
-        expected_time_range,
+        expected_date_after,
     )
     search_call_count, distinct_search_query_count = (
         v7.v6.v5._search_metrics(calls)
