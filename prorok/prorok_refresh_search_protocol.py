@@ -71,7 +71,7 @@ def _build_search_protocol(prompt: str) -> str:
     return f"""
 13. Mandatory search protocol before final report:
    - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: web_search; не використовуй provider-specific search tools як fallback;
-   - web_search має працювати через налаштований OpenClaw provider; для production PROROK цільовий provider — Brave;
+   - web_search має працювати через налаштований OpenClaw provider;
    - виконай щонайменше 3 окремі search calls з різними query;
    - search #1: broad factual search за основним формулюванням події;
    - search #2: indicator search — шукай нові факти, що можуть підвищити probability;
