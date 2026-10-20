@@ -50,30 +50,6 @@ def _parse_search_after_at(prompt: str) -> datetime | None:
     return _parse_datetime_field(prompt, _SEARCH_AFTER_RE) or _parse_last_assessed_at(prompt)
 
 
-def _choose_tavily_time_range(
-    last_assessed_at: datetime | None,
-    now: datetime | None = None,
-) -> str | None:
-    if last_assessed_at is None:
-        return None
-
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    if last_assessed_at > current:
-        return None
-
-    age_days = (current.date() - last_assessed_at.date()).days
-
-    if age_days <= 1:
-        return "day"
-    if age_days <= 7:
-        return "week"
-    if age_days <= 31:
-        return "month"
-    if age_days <= 365:
-        return "year"
-    return None
-
-
 def _build_search_protocol(prompt: str) -> str:
     search_after_at = _parse_search_after_at(prompt)
 
@@ -94,7 +70,7 @@ def _build_search_protocol(prompt: str) -> str:
 
     return f"""
 13. Mandatory search protocol before final report:
-   - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: web_search; не використовуй tavily_search або інший provider-specific search tool як fallback;
+   - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: web_search; не використовуй provider-specific search tools як fallback;
    - web_search має працювати через налаштований OpenClaw provider; для production PROROK цільовий provider — Brave;
    - виконай щонайменше 3 окремі search calls з різними query;
    - search #1: broad factual search за основним формулюванням події;
