@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PROROK refresh collector v5 with deterministic Tavily search-quality gating.
+"""PROROK refresh collector v5 with deterministic web_search quality gating.
 
 This module builds on collector v4. For NO_NEW_EVIDENCE results it validates the
 actual ordered search tool calls from the OpenClaw session transcript before the
@@ -11,7 +11,7 @@ Safety invariants:
 - candidate quarantine rules remain owned by prorok_refresh_collector.py;
 - positive candidate runs retain the v4 collection/quarantine path;
 - NO_NEW_EVIDENCE fails closed unless its first three search calls satisfy the
-  deterministic Tavily protocol.
+  deterministic web_search protocol.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ import prorok_refresh_collector_v4 as v4
 
 COLLECTOR_VERSION = "5"
 REQUIRED_CORE_SEARCH_CALLS = 3
-REQUIRED_TOOL = "tavily_search"
-REQUIRED_MAX_RESULTS = 7
+REQUIRED_TOOL = "web_search"
+REQUIRED_COUNT = 7
 FORBIDDEN_QUERY_TOKENS = ("after:", "site:news")
 
 
@@ -53,11 +53,11 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _expected_tavily_time_range(
+def _expected_search_date_after(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
 ) -> tuple[str | None, str | None]:
-    """Return deterministic Tavily range and the operational search boundary."""
+    """Return Brave/OpenClaw date_after and the exact operational boundary."""
     try:
         search_boundary = v4.base.resolve_search_boundary_datetime(conn, row)
     except v4.base.RefreshParseError:
@@ -72,17 +72,7 @@ def _expected_tavily_time_range(
     if search_boundary > reference:
         return None, boundary_raw
 
-    age_days = (reference.date() - search_boundary.date()).days
-
-    if age_days <= 1:
-        return "day", boundary_raw
-    if age_days <= 7:
-        return "week", boundary_raw
-    if age_days <= 31:
-        return "month", boundary_raw
-    if age_days <= 365:
-        return "year", boundary_raw
-    return None, boundary_raw
+    return search_boundary.date().isoformat(), boundary_raw
 
 
 def _extract_search_calls(session_path: Path) -> list[dict[str, Any]]:
@@ -133,7 +123,7 @@ def _search_metrics(calls: list[dict[str, Any]]) -> tuple[int, int]:
 
 def _evaluate_v5_search_quality(
     calls: list[dict[str, Any]],
-    expected_time_range: str | None,
+    expected_date_after: str | None,
 ) -> tuple[bool, str]:
     errors: list[str] = []
     call_count, distinct_count = _search_metrics(calls)
@@ -164,24 +154,24 @@ def _evaluate_v5_search_quality(
                 f"search #{index} tool must be {REQUIRED_TOOL}; observed {tool_name or 'missing'}"
             )
 
-        max_results = args.get("max_results")
-        if max_results != REQUIRED_MAX_RESULTS:
+        count = args.get("count")
+        if count != REQUIRED_COUNT:
             errors.append(
-                f"search #{index} max_results must be {REQUIRED_MAX_RESULTS}; "
-                f"observed {max_results!r}"
+                f"search #{index} count must be {REQUIRED_COUNT}; "
+                f"observed {count!r}"
             )
 
-        actual_time_range = args.get("time_range")
-        if expected_time_range is None:
-            if actual_time_range not in (None, ""):
+        actual_date_after = args.get("date_after")
+        if expected_date_after is None:
+            if actual_date_after not in (None, ""):
                 errors.append(
-                    f"search #{index} time_range must be omitted; "
-                    f"observed {actual_time_range!r}"
+                    f"search #{index} date_after must be omitted; "
+                    f"observed {actual_date_after!r}"
                 )
-        elif actual_time_range != expected_time_range:
+        elif actual_date_after != expected_date_after:
             errors.append(
-                f"search #{index} time_range must be {expected_time_range!r}; "
-                f"observed {actual_time_range!r}"
+                f"search #{index} date_after must be {expected_date_after!r}; "
+                f"observed {actual_date_after!r}"
             )
 
         lowered = query.lower()
@@ -197,11 +187,11 @@ def _evaluate_v5_search_quality(
             "v5 search protocol failed: " + "; ".join(errors),
         )
 
-    expected_label = expected_time_range if expected_time_range is not None else "omitted"
+    expected_label = expected_date_after if expected_date_after is not None else "omitted"
     return (
         True,
-        "ok v5: first 3 searches use tavily_search with "
-        f"max_results=7, time_range={expected_label}, 3 distinct queries, "
+        "ok v5: first 3 searches use web_search with "
+        f"count=7, date_after={expected_label}, 3 distinct queries, "
         "and no forbidden query operators",
     )
 
@@ -245,8 +235,8 @@ def collect_one_v5(
     if parsed.outcome != "no_new_evidence" or parsed.candidates:
         return v4.collect_one_v4(conn, state_dir, row)
 
-    expected_time_range, search_boundary_at = _expected_tavily_time_range(conn, row)
-    valid, reason = _evaluate_v5_search_quality(calls, expected_time_range)
+    expected_date_after, search_boundary_at = _expected_search_date_after(conn, row)
+    valid, reason = _evaluate_v5_search_quality(calls, expected_date_after)
     search_call_count, distinct_search_query_count = _search_metrics(calls)
 
     if valid:
