@@ -6,6 +6,7 @@ from pathlib import Path
 from prorok import prorok_refresh_collector_v5 as v5
 from prorok import prorok_refresh_collector_v6 as v6
 from prorok import prorok_refresh_collector_v7 as v7
+from prorok import prorok_refresh_dry_run_cron as refresh_cron
 from prorok.prorok_refresh_search_protocol import apply_search_protocol
 
 
@@ -131,6 +132,43 @@ def test_prompt_uses_openclaw_web_search_contract() -> None:
     assert "web_fetch" in result
     assert "tavily_search" not in result
     assert "tavily_extract" not in result
+    assert "НЕ передавай параметр freshness" in result
+    assert "date_after/date_before" in result
+
+
+def test_base_refresh_prompt_is_provider_agnostic_and_probability_grid_strict() -> None:
+    event = refresh_cron.EventState(
+        event_id="test_event",
+        title="Test",
+        question="Will the test event occur?",
+        forecast_horizon="2026-12-31",
+        status="active",
+        decision_criteria="{}",
+        tags="[]",
+    )
+    latest = refresh_cron.AssessmentState(
+        probability="25%",
+        band="25-35%",
+        label="Малоймовірно",
+        confidence="medium",
+        assessed_at="2026-10-18T05:20:00Z",
+        rationale="baseline",
+    )
+
+    result = refresh_cron.build_prompt(
+        event,
+        latest,
+        ["No evidence rows yet."],
+        "2026-10-18T05:20:00Z",
+    )
+
+    assert refresh_cron.DEFAULT_TOOLS == "web_search web_fetch read"
+    assert "тільки web_search" in result
+    assert "provider-specific search tools не використовуй" in result
+    assert "tavily_search" not in result
+    assert "tavily_extract" not in result
+    assert "27%, 43%, 62%" in result
+    assert "канонічною сіткою" in result
 
 
 def test_v5_accepts_three_brave_web_search_calls() -> None:
