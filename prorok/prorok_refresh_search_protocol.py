@@ -76,62 +76,57 @@ def _choose_tavily_time_range(
 
 def _build_search_protocol(prompt: str) -> str:
     search_after_at = _parse_search_after_at(prompt)
-    tavily_time_range = _choose_tavily_time_range(search_after_at)
 
     if search_after_at is None:
         boundary_text = "search_after_at/last_assessed_at не вдалося визначити як валідну дату"
-        time_range_rule = (
-            "не передавай time_range лише заради формального фільтра; "
-            "не вигадуй часову межу"
+        date_filter_rule = (
+            "не передавай date_after; не вигадуй часову межу"
         )
         exact_boundary = "невідома"
     else:
         exact_boundary = search_after_at.isoformat().replace("+00:00", "Z")
+        date_after = search_after_at.date().isoformat()
         boundary_text = f"точна межа search_after_at = {exact_boundary}"
-        if tavily_time_range:
-            time_range_rule = (
-                f'для search #1, #2 і #3 передай time_range: "{tavily_time_range}" '
-                "як coarse pre-filter"
-            )
-        else:
-            time_range_rule = (
-                "для search #1, #2 і #3 не передавай time_range, бо жодне з "
-                "day/week/month/year не покриває всю потрібну часову межу"
-            )
+        date_filter_rule = (
+            f'для search #1, #2 і #3 передай date_after: "{date_after}" '
+            "як coarse pre-filter"
+        )
 
     return f"""
 13. Mandatory search protocol before final report:
-   - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: tavily_search; не використовуй web_search як fallback; якщо tavily_search недоступний або повернув технічну помилку, не підмінюй його іншим search tool;
+   - єдиний дозволений пошуковий інструмент для search #1, #2 і #3: web_search; не використовуй tavily_search або інший provider-specific search tool як fallback;
+   - web_search має працювати через налаштований OpenClaw provider; для production PROROK цільовий provider — Brave;
    - виконай щонайменше 3 окремі search calls з різними query;
    - search #1: broad factual search за основним формулюванням події;
    - search #2: indicator search — шукай нові факти, що можуть підвищити probability;
-   - search #3: downside search — природною мовою шукай нові факти, що можуть знизити probability; НЕ використовуй у query внутрішні терміни counterindicator, counter-indicator або counter indicator; формулюй змістовно, наприклад: "signals suggesting Russia is unlikely to use nuclear weapons in Ukraine", "evidence of nuclear restraint", "absence of preparations for nuclear use" — адаптуй приклади до конкретної події, не копіюй їх механічно;
-   - для кожного search #1, #2 і #3 використовуй tavily_search з topic: "news" та max_results: 7; topic=news потрібен, щоб Tavily за можливості повернув publication metadata;
+   - search #3: downside search — природною мовою шукай нові факти, що можуть знизити probability; НЕ використовуй у query внутрішні терміни counterindicator, counter-indicator або counter indicator;
+   - для кожного search #1, #2 і #3 використовуй web_search з count: 7;
    - {boundary_text};
-   - {time_range_rule};
-   - time_range є лише грубим pre-filter і НЕ замінює точну перевірку дати кожного результату;
-   - для кожного результату tavily_search перевір поле published; тільки матеріал із published ПІСЛЯ {exact_boundary} може мати freshness: new_after_last_assessment; назва freshness є legacy schema label, фактична operational boundary — search_after_at;
-   - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через tavily_extract (бажано одним batch-викликом) або web_fetch до фінального висновку;
-   - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою search_after_at, підтвердь точну дату/час через сторінку джерела, tavily_extract або web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
+   - {date_filter_rule};
+   - date_after є лише грубим pre-filter і НЕ замінює точну перевірку published кожного результату;
+   - для кожного результату web_search перевір поле published; тільки матеріал із published ПІСЛЯ {exact_boundary} може мати freshness: new_after_last_assessment; назва freshness є legacy schema label, фактична operational boundary — search_after_at;
+   - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через web_fetch до фінального висновку;
+   - якщо published відсутній, неоднозначний або має лише дату, яка збігається з датою search_after_at, підтвердь точну дату/час через сторінку джерела за допомогою web_fetch; якщо підтвердити не можна, не класифікуй матеріал як new_after_last_assessment;
    - матеріал із published ДО або НА межі search_after_at не є новим evidence; його можна розглядати лише окремо як missed_baseline_evidence, якщо він істотно змінює баланс оцінки;
-   - правило чистоти query застосовується ДО КОЖНОГО tavily_search call без винятків: до search #1/#2/#3, zero-result retry, authority/source-specific checks і будь-яких додаткових пошуків;
-   - поле query має містити тільки природномовні тематичні слова; НЕ вставляй у query URL, hostname/domain name або будь-який search-engine field qualifier у форматі key:value;
-   - НЕ використовуй after:DATE у query; часову межу задавай тільки через time_range та подальшу перевірку published;
-   - якщо потрібно обмежити пошук конкретним джерелом або доменом, використовуй ТІЛЬКИ параметр include_domains і залишай query без доменного імені; приклади: Reuters -> include_domains: ["reuters.com"], AP -> include_domains: ["apnews.com"], ISW -> include_domains: ["understandingwar.org"];
-   - перед КОЖНИМ tavily_search виконай внутрішній parameter self-check: query не повинен містити URL/hostname/domain token, конструкцію з двокрапкою як search qualifier або інший search-engine operator; якщо містить — перепиши query природною мовою ДО виклику tool;
-   - якщо будь-який із search #1, #2 або #3 повернув 0 результатів, обов'язково ПІСЛЯ нього зроби додатковий tavily_search з іншим переформульованим query; retry також має використовувати topic: "news", max_results: 7, той самий time_range policy та пройти той самий parameter self-check;
+   - правило чистоти query застосовується ДО КОЖНОГО web_search call без винятків: до search #1/#2/#3, zero-result retry, authority/source-specific checks і будь-яких додаткових пошуків;
+   - поле query має містити тільки природномовні тематичні слова; НЕ вставляй URL, hostname/domain name або будь-який search-engine field qualifier у форматі key:value;
+   - НЕ використовуй after:DATE або site:DOMAIN у query; часову межу задавай тільки через date_after та подальшу перевірку published;
+   - якщо потрібно окремо перевірити Reuters, AP, ISW чи інше авторитетне джерело, назви організацію природною мовою у query без hostname/domain token;
+   - перед КОЖНИМ web_search виконай внутрішній parameter self-check: query не повинен містити URL/hostname/domain token, конструкцію з двокрапкою як search qualifier або інший search-engine operator; якщо містить — перепиши query природною мовою ДО виклику tool;
+   - якщо будь-який із search #1, #2 або #3 повернув kind="error" або іншу технічну помилку, не трактуй це як 0 результатів і не формуй NO_NEW_EVIDENCE_FOUND; завершуй звіт технічною помилкою;
+   - якщо будь-який із search #1, #2 або #3 успішно повернув kind="results", але count=0, обов'язково ПІСЛЯ нього зроби додатковий web_search з іншим переформульованим query; retry також має використовувати count: 7, той самий date_after policy та пройти той самий parameter self-check;
    - мова query має відповідати джерелам, які реально можуть висвітлювати тему; дозволено й бажано використовувати англійські, українські або російські формулювання залежно від теми;
-   - окремо перевір авторитетні першоджерела, великі медіа, think tanks або профільні інститути, якщо broad search недостатній; source-specific check теж повинен використовувати include_domains, а не доменне ім'я або search qualifier у query;
    - NO_NEW_EVIDENCE_FOUND дозволено тільки після виконання search protocol, обов'язкових zero-result retries та freshness verification для описаних вище результатів без published;
    - не створюй candidate evidence лише для проходження цього правила: якщо після достатнього пошуку й перевірки якісних нових evidence немає, поверни NO_NEW_EVIDENCE_FOUND.
-\n14. Mandatory pre-report freshness checkpoint (perform AFTER all searches, BEFORE composing the final report):
-   - переглянь фактичні tool results перших трьох tavily_search calls, не покладайся на пам'ять чи текст майбутнього звіту;
+
+14. Mandatory pre-report freshness checkpoint (perform AFTER all searches, BEFORE composing the final report):
+   - переглянь фактичні tool results перших трьох web_search calls, не покладайся на пам'ять чи текст майбутнього звіту;
+   - переконайся, що кожен із перших трьох tool results має kind="results"; kind="error", kind="answer" або kind="raw" не вважається валідним structured search result для PROROK;
    - для КОЖНОГО з цих трьох searches визнач перші 3 результати з URL та порожнім/відсутнім published; дедуплікуй URL між searches, але не пропускай жодного required URL;
-   - перевір, що ПІСЛЯ відповідного search для кожного required URL уже був виклик tavily_extract (можна batch urls) або web_fetch з цим URL; сам по собі пошук, припущення щодо дати або відмова від використання джерела НЕ замінює verification call;
-   - якщо хоч один required URL ще не перевірений, виконай відсутні verification calls ЗАРАЗ, навіть якщо збираєшся повернути NO_NEW_EVIDENCE_FOUND або джерело нерелевантне;
+   - перевір, що ПІСЛЯ відповідного search для кожного required URL уже був виклик web_fetch з цим URL; сам по собі пошук, припущення щодо дати або відмова від використання джерела НЕ замінює verification call;
+   - якщо хоч один required URL ще не перевірений, виконай відсутні web_fetch calls ЗАРАЗ, навіть якщо збираєшся повернути NO_NEW_EVIDENCE_FOUND або джерело нерелевантне;
    - лише після завершення всіх verification calls переходь до фінального PROROK_REFRESH_DRY_RUN; не додавай checkpoint чи перелік URL до фінальної відповіді.
 """.strip()
-
 
 def apply_search_protocol(prompt: str) -> str:
     if "Mandatory search protocol before final report:" in prompt:
