@@ -221,10 +221,38 @@ def get_event_detail(
             s.url,
             s.canonical_url,
             s.published_at,
-            s.source_type
+            s.source_type,
+            p.refresh_event_result_id,
+            rer.refresh_id,
+            d.decision_id,
+            d.decision_type,
+            d.baseline_probability,
+            d.selected_probability,
+            d.assessment_id AS decision_assessment_id,
+            d.decided_at,
+            em.evidence_assessment_decision_id AS manual_decision_id,
+            em.baseline_probability AS manual_baseline_probability,
+            em.selected_probability AS manual_selected_probability,
+            em.assessment_id AS manual_assessment_id,
+            em.decided_at AS manual_decided_at
         FROM evidence_items ei
         JOIN sources s
           ON s.source_id = ei.source_id
+        LEFT JOIN refresh_candidate_promotions p
+          ON p.evidence_id = ei.evidence_id
+         AND p.promotion_action = 'inserted'
+        LEFT JOIN refresh_user_decisions d
+          ON d.decision_id = p.decision_id
+        LEFT JOIN refresh_event_results rer
+          ON rer.refresh_event_result_id = p.refresh_event_result_id
+        LEFT JOIN evidence_assessment_decisions em
+          ON em.evidence_assessment_decision_id = (
+              SELECT em2.evidence_assessment_decision_id
+              FROM evidence_assessment_decisions em2
+              WHERE em2.evidence_id = ei.evidence_id
+              ORDER BY em2.decided_at DESC, em2.evidence_assessment_decision_id DESC
+              LIMIT 1
+          )
         WHERE ei.event_id = ?
         ORDER BY ei.created_at ASC, ei.evidence_id ASC
         """,
@@ -267,6 +295,26 @@ def get_event_detail(
                 "published_at": row["published_at"],
                 "source_type": row["source_type"],
             },
+            "assessment": {
+                "status": (
+                    ("assessed_unchanged" if int(row["manual_selected_probability"]) == int(row["manual_baseline_probability"]) else "assessed_changed")
+                    if row["manual_decision_id"] is not None
+                    else (
+                        "unknown" if row["decision_id"] is None
+                        else ("assessed_unchanged" if int(row["selected_probability"]) == int(row["baseline_probability"]) else "assessed_changed")
+                    )
+                ),
+                "provenance_type": "evidence_manual" if row["manual_decision_id"] is not None else ("refresh" if row["decision_id"] is not None else None),
+                "evidence_assessment_decision_id": row["manual_decision_id"],
+                "refresh_id": None if row["manual_decision_id"] is not None else row["refresh_id"],
+                "refresh_event_result_id": None if row["manual_decision_id"] is not None else row["refresh_event_result_id"],
+                "decision_id": None if row["manual_decision_id"] is not None else row["decision_id"],
+                "decision_type": "evidence_manual" if row["manual_decision_id"] is not None else row["decision_type"],
+                "baseline_probability": row["manual_baseline_probability"] if row["manual_decision_id"] is not None else row["baseline_probability"],
+                "selected_probability": row["manual_selected_probability"] if row["manual_decision_id"] is not None else row["selected_probability"],
+                "assessment_id": row["manual_assessment_id"] if row["manual_decision_id"] is not None else row["decision_assessment_id"],
+                "decided_at": row["manual_decided_at"] if row["manual_decision_id"] is not None else row["decided_at"],
+            },
         }
         for row in evidence_rows
     ]
@@ -293,6 +341,163 @@ def get_event_detail(
         "assessments": assessments,
         "evidence": evidence,
         "limitations": {
-            "assessment_evidence_attribution": "unavailable",
+            "assessment_evidence_attribution": "refresh_and_manual_provenance",
+        },
+    }
+
+
+def get_latest_recommendation(
+    conn: sqlite3.Connection,
+    event_id: str,
+) -> dict[str, Any] | None:
+    event = conn.execute(
+        "SELECT event_id FROM events WHERE event_id = ?",
+        (event_id,),
+    ).fetchone()
+    if event is None:
+        return None
+
+    row = conn.execute(
+        """
+        SELECT
+            rer.refresh_event_result_id,
+            rer.refresh_id,
+            rer.created_at,
+            rer.outcome,
+            rer.baseline_assessment_id,
+            rer.baseline_probability,
+            rer.recommended_probability,
+            rer.recommended_band,
+            rer.recommended_label,
+            rer.recommendation_confidence,
+            rer.recommendation_reason,
+            rer.probability_delta,
+            rer.net_evidence_direction,
+            rer.net_evidence_impact,
+            rer.baseline_incorporation,
+            rer.category_transition,
+            rer.delta_justification,
+            rer.change_recommended,
+            rer.candidate_rejected_count,
+            rer.recommendation_valid,
+            (
+                SELECT COUNT(*)
+                FROM refresh_candidate_evidence rce
+                WHERE rce.refresh_event_result_id = rer.refresh_event_result_id
+                  AND rce.validation_state = 'accepted'
+            ) AS accepted_candidate_count,
+            current.assessment_id AS current_assessment_id,
+            current.probability_percent AS current_probability,
+            d.decision_id,
+            d.decision_type,
+            d.selected_probability,
+            d.assessment_id AS decision_assessment_id,
+            d.decision_source,
+            d.decided_at
+        FROM refresh_event_results rer
+        LEFT JOIN assessments current
+          ON current.assessment_id = (
+              SELECT a.assessment_id
+              FROM assessments a
+              WHERE a.event_id = rer.event_id
+              ORDER BY a.assessed_at DESC, a.assessment_id DESC
+              LIMIT 1
+          )
+        LEFT JOIN refresh_user_decisions d
+          ON d.refresh_event_result_id = rer.refresh_event_result_id
+        WHERE rer.event_id = ?
+          AND rer.job_state = 'completed'
+          AND rer.recommendation_valid = 1
+          AND rer.recommended_probability IS NOT NULL
+        ORDER BY rer.created_at DESC, rer.refresh_event_result_id DESC
+        LIMIT 1
+        """,
+        (event_id,),
+    ).fetchone()
+
+    if row is None:
+        return {
+            "event_id": event_id,
+            "recommendation": None,
+        }
+
+    baseline_assessment_id = int(row["baseline_assessment_id"])
+    baseline_probability = int(row["baseline_probability"])
+    current_assessment_id = row["current_assessment_id"]
+    current_probability = row["current_probability"]
+
+    baseline_is_stale = (
+        current_assessment_id is None
+        or current_probability is None
+        or int(current_assessment_id) != baseline_assessment_id
+        or int(current_probability) != baseline_probability
+    )
+
+    decision = None
+    if row["decision_id"] is not None:
+        decision = {
+            "decision_id": row["decision_id"],
+            "decision_type": row["decision_type"],
+            "selected_probability": row["selected_probability"],
+            "assessment_id": row["decision_assessment_id"],
+            "decision_source": row["decision_source"],
+            "decided_at": row["decided_at"],
+        }
+
+    # Once a final decision exists, the recommendation is historical and no
+    # longer "stale" in the actionability sense. Accept/custom decisions
+    # intentionally create a newer assessment than the refresh baseline.
+    is_stale = baseline_is_stale if decision is None else False
+
+    change_recommended = bool(row["change_recommended"])
+    accepted_candidate_count = int(row["accepted_candidate_count"] or 0)
+    actionable = decision is None and not is_stale and change_recommended
+    can_keep_current = (
+        decision is None
+        and not is_stale
+        and not change_recommended
+        and accepted_candidate_count > 0
+    )
+
+    if decision is not None:
+        status = "decided"
+    elif is_stale:
+        status = "stale"
+    elif change_recommended:
+        status = "actionable"
+    else:
+        status = "no_change"
+
+    return {
+        "event_id": event_id,
+        "recommendation": {
+            "refresh_event_result_id": row["refresh_event_result_id"],
+            "refresh_id": row["refresh_id"],
+            "created_at": row["created_at"],
+            "outcome": row["outcome"],
+            "baseline_assessment_id": baseline_assessment_id,
+            "baseline_probability": baseline_probability,
+            "recommended_probability": int(row["recommended_probability"]),
+            "recommended_band": row["recommended_band"],
+            "recommended_label": row["recommended_label"],
+            "recommendation_confidence": row["recommendation_confidence"],
+            "recommendation_reason": row["recommendation_reason"],
+            "probability_delta": row["probability_delta"],
+            "net_evidence_direction": row["net_evidence_direction"],
+            "net_evidence_impact": row["net_evidence_impact"],
+            "baseline_incorporation": row["baseline_incorporation"],
+            "category_transition": None if row["category_transition"] is None else bool(row["category_transition"]),
+            "delta_justification": row["delta_justification"],
+            "change_recommended": change_recommended,
+            "candidate_rejected_count": int(row["candidate_rejected_count"] or 0),
+            "recommendation_valid": bool(row["recommendation_valid"]),
+            "current_assessment_id": current_assessment_id,
+            "current_probability": current_probability,
+            "is_stale": is_stale,
+            "actionable": actionable,
+            "can_keep_current": can_keep_current,
+            "accepted_candidate_count": accepted_candidate_count,
+            "status": status,
+            "decision": decision,
         },
     }
