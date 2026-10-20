@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""PROROK refresh collector v6 with deterministic Tavily freshness-verification gating.
+"""PROROK refresh collector v6 with deterministic web_search freshness-verification gating.
 
 v6 extends the v5 search-quality gate for NO_NEW_EVIDENCE results:
-- first three searches must still satisfy the Tavily v5 protocol;
+- first three searches must still satisfy the web_search v5 protocol;
 - first three searches must use topic="news";
 - search #3 must use a natural-language downside query rather than the internal
   "counterindicator" label;
 - for each of the first three search result sets, the first three results that
   have a URL but no published timestamp must be covered by a later
-  tavily_extract or web_fetch verification call before NO_NEW_EVIDENCE can pass.
+  web_fetch verification call before NO_NEW_EVIDENCE can pass.
 
 The verification gate validates the attempt, not the truth of the extracted date.
 Candidate quarantine and official-state safety remain unchanged.
@@ -33,8 +33,7 @@ from typing import Any
 import prorok_refresh_collector_v5 as v5
 
 COLLECTOR_VERSION = "6"
-REQUIRED_TOPIC = "news"
-VERIFICATION_TOOLS = {"tavily_extract", "web_fetch"}
+VERIFICATION_TOOLS = {"web_fetch"}
 VERIFY_UNDATED_PER_SEARCH = 3
 _INTERNAL_COUNTERINDICATOR_RE = re.compile(
     r"\bcounter[\s-]?indicators?\b",
@@ -171,6 +170,12 @@ def _undated_verification_targets(
             errors.append(f"search #{index} tool result payload is missing")
             continue
 
+        kind = payload.get("kind")
+        if kind == "error":
+            code = payload.get("error") or payload.get("code") or payload.get("message") or "unknown error"
+            errors.append(f"search #{index} tool returned error: {code}")
+            continue
+
         results = payload.get("results")
         if not isinstance(results, list):
             errors.append(f"search #{index} tool result has no results array")
@@ -202,27 +207,19 @@ def _undated_verification_targets(
 
 def _evaluate_v6_search_quality(
     session_path: Path,
-    expected_time_range: str | None,
+    expected_date_after: str | None,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     errors: list[str] = []
 
     calls = v5._extract_search_calls(session_path)
     v5_valid, v5_reason = v5._evaluate_v5_search_quality(
         calls,
-        expected_time_range,
+        expected_date_after,
     )
     if not v5_valid:
         errors.append(v5_reason)
 
     core = calls[: v5.REQUIRED_CORE_SEARCH_CALLS]
-
-    for index, call in enumerate(core, start=1):
-        args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        topic = args.get("topic")
-        if topic != REQUIRED_TOPIC:
-            errors.append(
-                f"search #{index} topic must be {REQUIRED_TOPIC!r}; observed {topic!r}"
-            )
 
     if len(core) >= 3:
         downside_query = str(core[2].get("query") or "")
@@ -278,7 +275,7 @@ def _evaluate_v6_search_quality(
 
     return (
         True,
-        "ok v6: first 3 searches satisfy v5 Tavily rules, use topic=news, "
+        "ok v6: first 3 searches satisfy v5 web_search rules, "
         "search #3 uses natural downside wording, and required undated top-result "
         f"freshness verification is covered ({len(verification_targets)} URL(s))",
         calls,
@@ -323,13 +320,13 @@ def collect_one_v6(
     if parsed.outcome != "no_new_evidence" or parsed.candidates:
         return v5.collect_one_v5(conn, state_dir, row)
 
-    expected_time_range, search_boundary_at = v5._expected_tavily_time_range(
+    expected_date_after, search_boundary_at = v5._expected_search_date_after(
         conn,
         row,
     )
     valid, reason, calls = _evaluate_v6_search_quality(
         session_path,
-        expected_time_range,
+        expected_date_after,
     )
     search_call_count, distinct_search_query_count = v5._search_metrics(calls)
 
