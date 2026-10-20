@@ -38,7 +38,7 @@ DEFAULT_CHAT_ID = "-1003804919781"
 DEFAULT_THREAD_ID = "112"
 DEFAULT_AT = "2m"
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_TOOLS = "tavily_search tavily_extract web_fetch read"
+DEFAULT_TOOLS = "web_search web_fetch read"
 
 
 @dataclass(frozen=True)
@@ -180,8 +180,8 @@ def build_prompt(
 - НЕ запускай /prorok add-evidence.
 - НЕ запускай /prorok assess.
 - НЕ вигадуй URL.
-- Для пошуку використовуй тільки tavily_search. tavily_extract і web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; web_search для PROROK refresh не використовуй.
-- Обов'язковий freshness verification gate: після ПЕРШИХ ТРЬОХ викликів tavily_search переглянь їхні results у порядку видачі. Для кожного пошуку візьми до 3 результатів із непорожнім URL, але без непорожнього поля published; для кожного такого URL ПІСЛЯ відповідного пошуку виклич tavily_extract(urls=[...]) або web_fetch(url=...). Повторний tavily_search не замінює verification. Виконай ці виклики навіть якщо зрештою повернеш NO_NEW_EVIDENCE_FOUND; не пропускай їх через низьку релевантність джерела. Не вигадуй published, а недоступні для перевірки джерела не включай до candidate evidence.
+- Для пошуку використовуй тільки web_search через налаштований OpenClaw provider. web_fetch використовуй лише для перевірки/витягування вмісту вже знайдених джерел; provider-specific search tools не використовуй.
+- Обов'язковий freshness verification gate: після ПЕРШИХ ТРЬОХ викликів web_search переглянь їхні results у порядку видачі. Для кожного пошуку візьми до 3 результатів із непорожнім URL, але без непорожнього поля published; для кожного такого URL ПІСЛЯ відповідного пошуку виклич web_fetch(url=...). Повторний web_search не замінює verification. Виконай ці виклики навіть якщо зрештою повернеш NO_NEW_EVIDENCE_FOUND; не пропускай їх через низьку релевантність джерела. Не вигадуй published, а недоступні для перевірки джерела не включай до candidate evidence.
 - Поверни тільки фінальний structured report українською мовою.
 
 Подія:
@@ -230,6 +230,7 @@ latest_rationale: {latest.rationale}
    - confirmation already-priced information не повинна автоматично підвищувати/знижувати probability;
    - зміна qualitative band потребує сильнішого обґрунтування, ніж рух усередині band;
    - допустимі значення probability ТІЛЬКИ: 0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100;
+   - перед фінальною відповіддю ОБОВ'ЯЗКОВО перевір recommended_probability: якщо воно numeric, воно має ТОЧНО дорівнювати одному зі значень вище; не повертай проміжні значення на кшталт 27%, 43%, 62% або будь-який інший відсоток поза канонічною сіткою;
    - канонічна шкала: 0-5%=Віддалена можливість; 10-20%=Ймовірність низька; 25-35%=Малоймовірно; 40-50%=Реалістична можливість; 55-75%=Ймовірно; 80-90%=Висока ймовірність; 95-100%=Майже напевно;
    - probability_delta = recommended_probability - baseline_probability;
    - category_transition=yes тільки якщо recommended_probability переходить в інший band;
