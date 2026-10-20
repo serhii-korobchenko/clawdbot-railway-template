@@ -3,7 +3,6 @@
 
 v6 extends the v5 search-quality gate for NO_NEW_EVIDENCE results:
 - first three searches must still satisfy the web_search v5 protocol;
-- first three searches must use topic="news";
 - search #3 must use a natural-language downside query rather than the internal
   "counterindicator" label;
 - for each of the first three search result sets, the first three results that
