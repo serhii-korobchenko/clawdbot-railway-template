@@ -79,6 +79,7 @@ def _build_search_protocol(prompt: str) -> str:
    - для кожного search #1, #2 і #3 використовуй web_search з count: 7;
    - {boundary_text};
    - {date_filter_rule};
+   - якщо передаєш date_after або date_before, НЕ передавай параметр freshness у цьому самому web_search call; ці режими часової фільтрації взаємовиключні;
    - date_after є лише грубим pre-filter і НЕ замінює точну перевірку published кожного результату;
    - для кожного результату web_search перевір поле published; тільки матеріал із published ПІСЛЯ {exact_boundary} може мати freshness: new_after_last_assessment; назва freshness є legacy schema label, фактична operational boundary — search_after_at;
    - freshness verification є обов'язковою частиною search attempt: для кожного з search #1, #2 і #3 візьми перші 3 результати, у яких URL присутній, але published відсутній або порожній, і перевір КОЖЕН такий URL через web_fetch до фінального висновку;
@@ -89,6 +90,7 @@ def _build_search_protocol(prompt: str) -> str:
    - НЕ використовуй after:DATE або site:DOMAIN у query; часову межу задавай тільки через date_after та подальшу перевірку published;
    - якщо потрібно окремо перевірити Reuters, AP, ISW чи інше авторитетне джерело, назви організацію природною мовою у query без hostname/domain token;
    - перед КОЖНИМ web_search виконай внутрішній parameter self-check: query не повинен містити URL/hostname/domain token, конструкцію з двокрапкою як search qualifier або інший search-engine operator; якщо містить — перепиши query природною мовою ДО виклику tool;
+   - у тому самому parameter self-check перевір time filters: при наявності date_after/date_before параметр freshness має бути відсутній;
    - якщо будь-який із search #1, #2 або #3 повернув kind="error" або іншу технічну помилку, не трактуй це як 0 результатів і не формуй NO_NEW_EVIDENCE_FOUND; завершуй звіт технічною помилкою;
    - якщо будь-який із search #1, #2 або #3 успішно повернув kind="results", але count=0, обов'язково ПІСЛЯ нього зроби додатковий web_search з іншим переформульованим query; retry також має використовувати count: 7, той самий date_after policy та пройти той самий parameter self-check;
    - мова query має відповідати джерелам, які реально можуть висвітлювати тему; дозволено й бажано використовувати англійські, українські або російські формулювання залежно від теми;
