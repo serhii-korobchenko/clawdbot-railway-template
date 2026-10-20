@@ -2,9 +2,9 @@
 """PROROK refresh collector v7 with deterministic query/retry hardening.
 
 v7 extends the v6 NO_NEW_EVIDENCE gate:
-- forbids any site: operator in Tavily search queries;
-- if any of the first three core Tavily searches returns zero results, requires
-  a later Tavily retry with a different query and the same required search
+- forbids any site: operator in web_search queries;
+- if any of the first three core web_searches returns zero results, requires
+  a later web_search retry with a different query and the same required search
   parameters before NO_NEW_EVIDENCE can pass.
 
 The downside-search semantic quality remains prompt-guided rather than enforced
@@ -49,7 +49,7 @@ def _result_count(payload: dict[str, Any] | None) -> int | None:
 
 def _retry_parameters_valid(
     call: dict[str, Any],
-    expected_time_range: str | None,
+    expected_date_after: str | None,
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
 
@@ -71,28 +71,24 @@ def _retry_parameters_valid(
     if FORBIDDEN_AFTER_TOKEN in lowered:
         errors.append("retry query contains forbidden after: operator")
 
-    if args.get("max_results") != v6.v5.REQUIRED_MAX_RESULTS:
+    if args.get("count") != v6.v5.REQUIRED_COUNT:
         errors.append(
-            f"retry max_results must be {v6.v5.REQUIRED_MAX_RESULTS}; "
-            f"observed {args.get('max_results')!r}"
+            f"retry count must be {v6.v5.REQUIRED_COUNT}; "
+            f"observed {args.get('count')!r}"
         )
 
-    if args.get("topic") != v6.REQUIRED_TOPIC:
-        errors.append(
-            f"retry topic must be {v6.REQUIRED_TOPIC!r}; observed {args.get('topic')!r}"
-        )
-
-    actual_time_range = args.get("time_range")
-    if expected_time_range is None:
-        if actual_time_range not in (None, ""):
+    if 
+    actual_date_after = args.get("date_after")
+    if expected_date_after is None:
+        if actual_date_after not in (None, ""):
             errors.append(
-                "retry time_range must be omitted; "
-                f"observed {actual_time_range!r}"
+                "retry date_after must be omitted; "
+                f"observed {actual_date_after!r}"
             )
-    elif actual_time_range != expected_time_range:
+    elif actual_date_after != expected_date_after:
         errors.append(
-            f"retry time_range must be {expected_time_range!r}; "
-            f"observed {actual_time_range!r}"
+            f"retry date_after must be {expected_date_after!r}; "
+            f"observed {actual_date_after!r}"
         )
 
     return not errors, errors
@@ -100,19 +96,19 @@ def _retry_parameters_valid(
 
 def _evaluate_v7_search_quality(
     session_path: Path,
-    expected_time_range: str | None,
+    expected_date_after: str | None,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     errors: list[str] = []
 
     v6_valid, v6_reason, calls = v6._evaluate_v6_search_quality(
         session_path,
-        expected_time_range,
+        expected_date_after,
     )
     if not v6_valid:
         errors.append(v6_reason)
 
     # v6 checks the first three core queries. v7 closes the broader loophole by
-    # rejecting site: in every Tavily search query, including retries.
+    # rejecting site: in every web_search query, including retries.
     for index, call in enumerate(calls, start=1):
         if str(call.get("tool") or "") != v6.v5.REQUIRED_TOOL:
             continue
@@ -158,7 +154,7 @@ def _evaluate_v7_search_quality(
 
             valid_params, retry_errors = _retry_parameters_valid(
                 candidate,
-                expected_time_range,
+                expected_date_after,
             )
             if not valid_params:
                 rejected_retry_reasons.extend(retry_errors)
@@ -178,7 +174,7 @@ def _evaluate_v7_search_quality(
                 )
             errors.append(
                 f"search #{core_index} returned 0 results and lacks a later valid "
-                f"tavily_search retry with a different query{detail}"
+                f"web_search retry with a different query{detail}"
             )
 
     if errors:
@@ -190,7 +186,7 @@ def _evaluate_v7_search_quality(
 
     return (
         True,
-        "ok v7: v6 Tavily/freshness rules pass, no Tavily query uses site:, "
+        "ok v7: v6 web_search/freshness rules pass, no Tavily query uses site:, "
         f"and zero-result core searches have valid later retries ({len(zero_core)} zero-result core search(es))",
         calls,
     )
@@ -239,12 +235,12 @@ def collect_one_v7(
     if parsed.outcome != "no_new_evidence" or parsed.candidates:
         return v6.collect_one_v6(conn, state_dir, row)
 
-    expected_time_range, search_boundary_at = (
-        v6.v5._expected_tavily_time_range(conn, row)
+    expected_date_after, search_boundary_at = (
+        v6.v5._expected_tavily_date_after(conn, row)
     )
     valid, reason, calls = _evaluate_v7_search_quality(
         session_path,
-        expected_time_range,
+        expected_date_after,
     )
     search_call_count, distinct_search_query_count = v6.v5._search_metrics(calls)
 
