@@ -22,6 +22,7 @@ const EVIDENCE_RECOMMENDATION_CLI = process.env.PROROK_EVIDENCE_RECOMMENDATION_C
 const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_cli.py";
 const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_status_cli.py";
 const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/prorok_refresh_all_dry_run_quiet.py";
+const SCHEDULE_CLI = process.env.PROROK_SCHEDULE_CLI || "/app/prorok/prorok_schedule_cli.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const CANDIDATE_REVIEW_CLI = "prorok/prorok_candidate_review_cli.py";
@@ -2004,6 +2005,50 @@ async function manualRefreshPresentation() {
   }
 }
 
+async function scheduleCli(...args) {
+  const { stdout } = await execFileAsync(PYTHON_BIN, [SCHEDULE_CLI, ...args], {
+    timeout: 35000,
+    maxBuffer: 32 * 1024,
+    env: process.env,
+  });
+  return JSON.parse(stdout);
+}
+
+const SCHEDULE_LABELS = { daily: "Щодня", "3d": "Кожні 3 дні", "7d": "Кожні 7 днів", off: "Вимкнено" };
+
+async function schedulePresentation() {
+  const state = await scheduleCli("status");
+  return {
+    title: "🕒 Автоматичне оновлення PROROK",
+    tone: "neutral",
+    blocks: [
+      textBlock(`Режим: ${SCHEDULE_LABELS[state.mode] || state.mode}\nCron: ${state.enabled ? "увімкнено" : "вимкнено"}\nНаступна перевірка: ${state.next_due || "не заплановано"}`),
+      ...Object.entries(SCHEDULE_LABELS).map(([mode, label]) =>
+        buttonsBlock([button(`${mode === state.mode ? "✅ " : ""}${label}`, `schedule-confirm:${mode}`)])),
+      buttonsBlock([button("◀️ Керування", "manage")]),
+    ],
+  };
+}
+
+function scheduleConfirmPresentation(mode) {
+  if (!Object.hasOwn(SCHEDULE_LABELS, mode)) throw new Error("Invalid schedule mode");
+  return {
+    title: "🕒 Підтвердження розкладу",
+    tone: "warning",
+    blocks: [
+      textBlock(`Змінити автоматичне оновлення PROROK на: ${SCHEDULE_LABELS[mode]}? Ручні перевірки залишаться доступними.`),
+      buttonsBlock([button("✅ Підтвердити", `schedule-apply:${mode}`, "primary", false)]),
+      buttonsBlock([button("◀️ Скасувати", "schedule")]),
+    ],
+  };
+}
+
+async function scheduleApplyPresentation(mode) {
+  if (!Object.hasOwn(SCHEDULE_LABELS, mode)) throw new Error("Invalid schedule mode");
+  await scheduleCli("set", mode);
+  return await schedulePresentation();
+}
+
 function managePresentation() {
   return {
     title: "⚙️ Керування",
@@ -2016,6 +2061,7 @@ function managePresentation() {
       buttonsBlock([button("🧾 Керування evidence", "evidence:all:0")]),
       buttonsBlock([button("🎯 Рекомендації", "recommendations")]),
       buttonsBlock([button("🔄 Запустити перевірку", "refresh-run", "primary")]),
+      buttonsBlock([button("🕒 Автоматичне оновлення", "schedule")]),
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
@@ -2494,6 +2540,9 @@ async function renderPayload(payload, ctx = null) {
     return await archivePresentation(Number.parseInt(rawPage, 10));
   }
   if (payload === "manage") return managePresentation();
+  if (payload === "schedule") return await schedulePresentation();
+  if (payload.startsWith("schedule-confirm:")) return scheduleConfirmPresentation(payload.slice("schedule-confirm:".length));
+  if (payload.startsWith("schedule-apply:")) return await scheduleApplyPresentation(payload.slice("schedule-apply:".length));
   if (payload === "recommendations") return await recommendationsPresentation();
   if (payload.startsWith("manage-events:")) {
     const rawPage = payload.slice("manage-events:".length);
