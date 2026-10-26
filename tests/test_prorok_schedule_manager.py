@@ -47,3 +47,10 @@ def test_due_guard_checks_real_cron():
     source = MODULE.read_text(encoding="utf-8")
     assert 'Cron and persisted cadence are inconsistent' in source
     assert 'job.get("schedule", {}).get("expr") != SCHEDULE' in source
+
+def test_telegram_text_schedule_routing():
+    ui = (MODULE.parents[1] / "prorok_telegram/src/index.js").read_text(encoding="utf-8")
+    assert "acceptsArgs: true" in ui
+    assert 'const raw = String(ctx?.args || "").trim();' in ui
+    assert 'scheduleConfirmPresentation(parts[1])' in ui
+    assert '"/app/prorok/prorok_router.py", raw' in ui
