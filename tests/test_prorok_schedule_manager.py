@@ -37,3 +37,13 @@ def test_telegram_menu_and_guard():
     assert 'schedule-confirm:' in ui and 'schedule-apply:' in ui
     wrapper = (root / "prorok/prorok_scheduled_refresh.sh").read_text(encoding="utf-8")
     assert "prorok_schedule_cli.py due" in wrapper
+
+def test_router_supports_schedule_fallback():
+    router = (MODULE.parents[1] / "prorok/prorok_router.py").read_text(encoding="utf-8")
+    assert 'if subcommand == "schedule":' in router
+    assert '["set", rest[0]] if rest else ["status"]' in router
+
+def test_due_guard_checks_real_cron():
+    source = MODULE.read_text(encoding="utf-8")
+    assert 'Cron and persisted cadence are inconsistent' in source
+    assert 'job.get("schedule", {}).get("expr") != SCHEDULE' in source
