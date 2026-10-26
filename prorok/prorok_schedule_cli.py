@@ -101,6 +101,10 @@ def main(argv=None):
                     run_cron("edit", CRON_ID, "--disable")
                 else:
                     run_cron("edit", CRON_ID, "--cron", SCHEDULE, "--tz", TIMEZONE, "--exact", "--enable")
+                # Verify scheduler mutation before committing durable settings.
+                verified = read_job()
+                if bool(verified.get("enabled")) != expected_active:
+                    raise RuntimeError("Cron update was not applied; schedule state unchanged")
                 state = {"mode": args.mode, "anchor_date": (now_kyiv().date() + dt.timedelta(days=1)).isoformat()}
                 save_state(path, state)
             job = read_job()
