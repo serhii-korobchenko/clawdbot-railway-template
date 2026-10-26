@@ -1,0 +1,123 @@
+"""End-to-end public Instagram Reel extraction for downstream agent synthesis."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from openai import OpenAI
+
+from .reel_download import canonicalize_instagram_url, canonicalize_reel_url, download_public_reel
+from .post_download import download_post_media
+from .reel_media import _probe_duration, extract_audio, extract_contact_sheet
+from .reel_vision import describe_contact_sheet, describe_post_images
+
+
+class ReelAnalysisError(RuntimeError):
+    pass
+
+
+def summarize_post(visual_facts: str) -> str:
+    """Synthesize a short Ukrainian overview from recognized slide facts only."""
+    if not visual_facts.strip():
+        return ""
+    if not os.getenv("OPENAI_API_KEY"):
+        return ""
+    try:
+        response = OpenAI().chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": (
+                    "Write a substantive 2–4 sentence Ukrainian summary of an Instagram post "
+                    "from the supplied slide observations. State its main topic, central message "
+                    "and practical takeaway when present. Do not list slides, repeat their text "
+                    "verbatim, add unsupported facts, or present claims in the post as verified. "
+                    "If the post is promotional, mention that. Output only the summary."
+                )},
+                {"role": "user", "content": visual_facts},
+            ],
+            max_tokens=240,
+            temperature=0.2,
+            timeout=45,
+        )
+        return str(response.choices[0].message.content or "").strip()
+    except Exception:
+        # Summary is optional: a model/API failure must not discard the slide analysis.
+        return ""
+
+
+class ReelAnalyzer:
+    def __init__(self, *, max_duration: int = 300, vision_model: str = "openai/gpt-4.1-mini"):
+        self.max_duration = max_duration
+        self.vision_model = vision_model
+
+    def _transcribe(self, audio: Path) -> str:
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ReelAnalysisError("OPENAI_API_KEY is not configured.")
+        client = OpenAI()
+        with audio.open("rb") as handle:
+            result = client.audio.transcriptions.create(model="gpt-4o-mini-transcribe", file=handle)
+        return str(result.text or "").strip()
+
+    def analyze(self, raw_url: str) -> dict:
+        url, kind, selected = canonicalize_instagram_url(raw_url)
+        if kind == "p":
+            try:
+                with tempfile.TemporaryDirectory(prefix="instagram-post-") as tmp:
+                    images, selected, kinds = download_post_media(url, Path(tmp))
+                    visual = describe_post_images(images, selected=selected, kinds=kinds, model=self.vision_model)
+                    return {
+                        "url": url, "media_type": "post", "title": None,
+                        "uploader": None, "duration": None, "transcript": "",
+                        "visual_facts": visual,
+                        "summary": summarize_post(visual),
+                    }
+            except Exception as exc:
+                raise ReelAnalysisError(str(exc)) from exc
+        url = canonicalize_reel_url(url)
+        try:
+            with tempfile.TemporaryDirectory(prefix="reel-analyzer-") as tmp:
+                workdir = Path(tmp)
+                media, metadata = download_public_reel(url, workdir, max_duration=self.max_duration)
+                duration = metadata.get("duration")
+                if duration is None:
+                    duration = _probe_duration(media)
+                if duration and float(duration) > self.max_duration:
+                    raise ReelAnalysisError(
+                        f"Reel is too long ({float(duration):.1f}s; limit {self.max_duration}s)."
+                    )
+                audio = extract_audio(media, workdir / "audio.wav")
+                sheet = extract_contact_sheet(media, workdir / "contact-sheet.jpg")
+                transcript = self._transcribe(audio)
+                visual = describe_contact_sheet(sheet, model=self.vision_model)
+                return {
+                    "url": url,
+                    "title": metadata.get("title"),
+                    "uploader": metadata.get("uploader"),
+                    "duration": duration,
+                    "transcript": transcript,
+                    "visual_facts": visual,
+                }
+        except ReelAnalysisError:
+            raise
+        except Exception as exc:
+            raise ReelAnalysisError(str(exc)) from exc
+
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Analyze a public Instagram Reel for OpenClaw.")
+    parser.add_argument("url")
+    args = parser.parse_args()
+    try:
+        print(json.dumps(ReelAnalyzer().analyze(args.url), ensure_ascii=False))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

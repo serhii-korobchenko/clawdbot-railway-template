@@ -24,7 +24,13 @@ recommended_band: n/a
 recommended_label: n/a
 confidence: medium
 change_from_baseline: no_update
+probability_delta: n/a
+net_evidence_direction: n/a
+net_evidence_impact: n/a
+baseline_incorporation: n/a
+category_transition: n/a
 rationale: Підстав для зміни немає.
+delta_justification: n/a
 
 DB_ACTION:
 do_not_write: true
@@ -55,10 +61,16 @@ freshness: new_after_last_assessment
 ASSESSMENT_RECOMMENDATION:
 recommended_probability: 30%
 recommended_band: 25-35%
-recommended_label: Можливо
+recommended_label: Малоймовірно
 confidence: medium
 change_from_baseline: increase
+probability_delta: 10
+net_evidence_direction: positive
+net_evidence_impact: moderate
+baseline_incorporation: medium
+category_transition: yes
 rationale: Новий evidence підтримує помірне підвищення.
+delta_justification: Новий незалежний сигнал виправдовує підвищення на 10 п.п. і перехід до наступної категорії.
 
 DB_ACTION:
 do_not_write: true
@@ -155,7 +167,15 @@ def make_v3_db(path: Path) -> None:
             recommendation_confidence TEXT,
             change_recommended INTEGER NOT NULL DEFAULT 0,
             recommendation_reason TEXT,
+            probability_delta INTEGER,
+            net_evidence_direction TEXT,
+            net_evidence_impact TEXT,
+            baseline_incorporation TEXT,
+            category_transition INTEGER,
+            delta_justification TEXT,
             summary TEXT,
+            candidate_rejected_count INTEGER NOT NULL DEFAULT 0,
+            recommendation_valid INTEGER NOT NULL DEFAULT 1,
             created_at TEXT
         );
 
@@ -175,6 +195,8 @@ def make_v3_db(path: Path) -> None:
             why_it_matters TEXT,
             duplicate_risk TEXT,
             freshness TEXT,
+            validation_state TEXT NOT NULL DEFAULT 'legacy_unvalidated',
+            rejection_reason TEXT,
             created_at TEXT,
             UNIQUE(refresh_event_result_id, ordinal)
         );
@@ -296,6 +318,12 @@ def test_collect_positive_transcript(tmp_path: Path) -> None:
     assert result["job_state"] == "completed"
     assert result["outcome"] == "new_evidence"
     assert result["recommended_probability"] == 30
+    assert result["probability_delta"] == 10
+    assert result["net_evidence_direction"] == "positive"
+    assert result["net_evidence_impact"] == "moderate"
+    assert result["baseline_incorporation"] == "medium"
+    assert result["category_transition"] == 1
+    assert result["delta_justification"] == "Новий незалежний сигнал виправдовує підвищення на 10 п.п. і перехід до наступної категорії."
     assert result["do_not_write"] == 1
     assert result["source_run_key"]
     assert result["transcript_sha256"]
@@ -524,11 +552,16 @@ def test_invalid_published_at_still_fails_safe(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "must be an ISO-8601 date or datetime" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "no_new_evidence"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_invalid_metadata"
+    assert "must be an ISO-8601 date or datetime" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_source_policy_rejects_banned_domain(tmp_path: Path) -> None:
@@ -545,12 +578,15 @@ def test_source_policy_rejects_banned_domain(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "source policy violation" in result["parse_error"]
-    assert "facebook.com" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_source_policy"
+    assert "facebook.com" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_source_policy_rejects_banned_subdomain(tmp_path: Path) -> None:
@@ -567,11 +603,14 @@ def test_source_policy_rejects_banned_subdomain(tmp_path: Path) -> None:
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert "source policy violation" in result["parse_error"]
-    assert "youtube.com" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_source_policy"
+    assert "youtube.com" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> None:
@@ -604,14 +643,14 @@ def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> 
         INSERT INTO refresh_candidate_evidence(
             refresh_event_result_id,ordinal,direction,strength,relevance,
             credibility,title,source,url,published_at,summary,why_it_matters,
-            duplicate_risk,freshness
+            duplicate_risk,freshness,validation_state
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             prior_result_id, 1, "indicator", "medium", 90, 90,
             "Prior", "Example", "https://example.com/a", "2026-09-05",
-            "Prior summary", "Prior why", "low", "new_after_last_assessment",
+            "Prior summary", "Prior why", "low", "new_after_last_assessment", "accepted",
         ),
     )
     conn.commit()
@@ -627,12 +666,15 @@ def test_url_date_consistency_rejects_conflicting_prior_date(tmp_path: Path) -> 
     counts = collect_once(db, state)
     result, batch, candidates = get_state(db)
 
-    assert counts == {"parse_failed": 1}
-    assert result["job_state"] == "parse_failed"
-    assert "published_at conflict" in result["parse_error"]
-    assert "2026-09-05" in result["parse_error"]
-    assert candidates == []
-    assert batch["status"] == "failed"
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert len(candidates) == 1
+    assert candidates[0]["validation_state"] == "rejected_date_conflict"
+    assert "2026-09-05" in candidates[0]["rejection_reason"]
+    assert batch["status"] == "completed"
 
 
 def test_url_date_consistency_accepts_same_calendar_date(tmp_path: Path) -> None:
@@ -686,9 +728,60 @@ def test_url_date_consistency_accepts_same_calendar_date(tmp_path: Path) -> None
 
     assert counts == {"completed": 1}
     assert result["job_state"] == "completed"
+    assert result["candidate_rejected_count"] == 0
+    assert result["recommendation_valid"] == 1
     assert len(candidates) == 1
     assert candidates[0]["published_at"] == "2026-09-08"
+    assert candidates[0]["validation_state"] == "accepted"
     assert batch["status"] == "completed"
+
+
+def test_mixed_candidates_quarantine_invalidates_recommendation(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    state = tmp_path / "state"
+    make_v3_db(db)
+
+    report = POSITIVE_REPORT.replace(
+        "ASSESSMENT_RECOMMENDATION:",
+        """2.
+direction: counterindicator
+strength: medium
+relevance: 80
+credibility: 80
+title: Banned source
+source: Facebook
+url: https://www.facebook.com/example/post/123
+published_at: 2026-09-09
+summary: Другий факт.
+why_it_matters: Впливає на оцінку.
+duplicate_risk: low
+freshness: new_after_last_assessment
+
+ASSESSMENT_RECOMMENDATION:""",
+    )
+
+    write_run(state)
+    write_session(state, report)
+
+    counts = collect_once(db, state)
+    result, batch, candidates = get_state(db)
+
+    assert counts == {"completed": 1}
+    assert result["job_state"] == "completed"
+    assert result["outcome"] == "new_evidence"
+    assert result["new_evidence_count"] == 1
+    assert result["candidate_rejected_count"] == 1
+    assert result["recommendation_valid"] == 0
+    assert result["recommended_probability"] is None
+    assert result["recommended_band"] is None
+    assert result["change_recommended"] == 0
+    assert len(candidates) == 2
+    assert candidates[0]["validation_state"] == "accepted"
+    assert candidates[1]["validation_state"] == "rejected_source_policy"
+    assert batch["status"] == "completed"
+    assert batch["events_checked"] == 1
+    assert batch["new_evidence_count"] == 1
+    assert batch["recommendations_count"] == 0
 
 
 def test_complete_summary_fallback_when_session_missing(tmp_path: Path) -> None:
@@ -789,3 +882,29 @@ def test_nested_openclaw_message_shape_is_supported(tmp_path: Path) -> None:
 
     assert counts == {"completed": 1}
     assert result["job_state"] == "completed"
+
+
+
+
+def test_v4_apply_success_contract_includes_quarantine_rows() -> None:
+    """Guard the versioned collector against base.apply_success signature drift."""
+    import ast
+    from pathlib import Path
+
+    source = Path("prorok/prorok_refresh_collector_v4.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "collect_one_v4"
+    ]
+    assert len(functions) == 1
+    calls = [
+        node
+        for node in ast.walk(functions[0])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "apply_success"
+    ]
+    assert len(calls) == 1
+    names = [arg.id for arg in calls[0].args if isinstance(arg, ast.Name)]
+    assert names[-3:] == ["parsed", "quarantine_rows", "candidate_validation"]

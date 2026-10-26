@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .api_client import ProrokApiClient
 from .config import DashboardSettings
-from .routes import auth, events, overview
+from .routes import auth, events, evidence, overview
 from .view_models import (
     delta_symbol,
     delta_text,
@@ -108,5 +108,6 @@ def create_app(
     app.include_router(auth.router)
     app.include_router(overview.router)
     app.include_router(events.router)
+    app.include_router(evidence.router)
 
     return app

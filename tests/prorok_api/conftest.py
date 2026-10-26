@@ -87,6 +87,91 @@ def db_path(tmp_path):
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE refresh_event_results (
+            refresh_event_result_id INTEGER PRIMARY KEY,
+            refresh_id INTEGER NOT NULL,
+            event_id TEXT,
+            event_title_snapshot TEXT NOT NULL,
+            baseline_assessment_id INTEGER,
+            baseline_probability INTEGER,
+            job_state TEXT NOT NULL,
+            outcome TEXT,
+            recommended_probability INTEGER,
+            recommended_band TEXT,
+            recommended_label TEXT,
+            recommendation_confidence TEXT,
+            recommendation_reason TEXT,
+            probability_delta INTEGER,
+            net_evidence_direction TEXT,
+            net_evidence_impact TEXT,
+            baseline_incorporation TEXT,
+            category_transition INTEGER,
+            delta_justification TEXT,
+            change_recommended INTEGER NOT NULL DEFAULT 0,
+            candidate_rejected_count INTEGER NOT NULL DEFAULT 0,
+            recommendation_valid INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE refresh_candidate_evidence (
+            candidate_id INTEGER PRIMARY KEY,
+            refresh_event_result_id INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            direction TEXT,
+            strength TEXT,
+            relevance INTEGER,
+            credibility INTEGER,
+            title TEXT,
+            source TEXT,
+            url TEXT,
+            published_at TEXT,
+            summary TEXT,
+            why_it_matters TEXT,
+            duplicate_risk TEXT,
+            freshness TEXT,
+            created_at TEXT NOT NULL,
+            validation_state TEXT NOT NULL DEFAULT 'pending'
+        );
+
+        CREATE TABLE refresh_candidate_promotions (
+            promotion_id INTEGER PRIMARY KEY,
+            candidate_id INTEGER NOT NULL UNIQUE,
+            refresh_event_result_id INTEGER NOT NULL,
+            decision_id INTEGER NOT NULL,
+            evidence_id INTEGER,
+            run_id INTEGER NOT NULL,
+            promotion_action TEXT NOT NULL,
+            promoted_at TEXT NOT NULL
+        );
+
+        CREATE TABLE evidence_assessment_decisions (
+            evidence_assessment_decision_id INTEGER PRIMARY KEY,
+            event_id_snapshot TEXT NOT NULL,
+            evidence_id INTEGER NOT NULL,
+            baseline_assessment_id INTEGER NOT NULL,
+            baseline_probability INTEGER NOT NULL,
+            selected_probability INTEGER NOT NULL,
+            assessment_id INTEGER NOT NULL UNIQUE,
+            run_id INTEGER NOT NULL,
+            decision_source TEXT NOT NULL,
+            actor TEXT,
+            decided_at TEXT NOT NULL
+        );
+
+        CREATE TABLE refresh_user_decisions (
+            decision_id INTEGER PRIMARY KEY,
+            refresh_event_result_id INTEGER NOT NULL UNIQUE,
+            event_id_snapshot TEXT NOT NULL,
+            decision_type TEXT NOT NULL,
+            baseline_assessment_id INTEGER,
+            baseline_probability INTEGER NOT NULL,
+            recommended_probability INTEGER,
+            selected_probability INTEGER NOT NULL,
+            assessment_id INTEGER,
+            decision_source TEXT NOT NULL,
+            decided_at TEXT NOT NULL
+        );
+
         CREATE VIEW latest_event_state AS
         SELECT
             e.event_id,
@@ -188,6 +273,59 @@ def db_path(tmp_path):
             1, 'active_event', 1, 11, 'indicator',
             'medium', 'Evidence summary', 80, 90,
             '2026-06-01T09:30:00Z'
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO refresh_event_results(
+            refresh_event_result_id,
+            refresh_id,
+            event_id,
+            event_title_snapshot,
+            baseline_assessment_id,
+            baseline_probability,
+            job_state,
+            outcome,
+            recommended_probability,
+            recommended_band,
+            recommended_label,
+            recommendation_confidence,
+            recommendation_reason,
+            probability_delta,
+            net_evidence_direction,
+            net_evidence_impact,
+            baseline_incorporation,
+            category_transition,
+            delta_justification,
+            change_recommended,
+            candidate_rejected_count,
+            recommendation_valid,
+            created_at
+        ) VALUES (
+            100,
+            50,
+            'active_event',
+            'Nuclear test event',
+            1,
+            35,
+            'completed',
+            'new_evidence',
+            45,
+            '40-50%',
+            'Реалістична можливість',
+            'medium',
+            'New evidence supports an increase.',
+            10,
+            'positive',
+            'moderate',
+            'medium',
+            1,
+            'Independent evidence supports a 10 percentage-point increase and a category transition.',
+            1,
+            0,
+            1,
+            '2026-06-02T12:00:00Z'
         )
         """
     )
