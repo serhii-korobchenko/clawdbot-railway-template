@@ -2560,10 +2560,26 @@ export default definePluginEntry({
     api.registerCommand({
       name: "prorok",
       description: "Open the PROROK control menu.",
-      acceptsArgs: false,
+      acceptsArgs: true,
       requireAuth: true,
       channels: ["telegram"],
-      handler: async () => ({ text: "PROROK", presentation: mainPresentation() }),
+      handler: async (ctx) => {
+        const raw = String(ctx?.args || "").trim();
+        if (!raw) return { text: "PROROK", presentation: mainPresentation() };
+        const parts = raw.split(/\s+/);
+        if (parts[0] === "schedule") {
+          if (parts.length === 1) return { text: "PROROK", presentation: await schedulePresentation() };
+          if (parts.length === 2 && Object.hasOwn(SCHEDULE_LABELS, parts[1])) {
+            return { text: "PROROK", presentation: scheduleConfirmPresentation(parts[1]) };
+          }
+          return { text: "Використання: /prorok schedule [daily|3d|7d|off]" };
+        }
+        // Preserve legacy deterministic /prorok command handling.
+        const { stdout } = await execFileAsync(PYTHON_BIN, [
+          "/app/prorok/prorok_router.py", raw,
+        ], { timeout: 35000, maxBuffer: 128 * 1024, env: process.env });
+        return { text: stdout.trim() || "PROROK: виконано." };
+      },
     });
 
     api.registerInteractiveHandler({
