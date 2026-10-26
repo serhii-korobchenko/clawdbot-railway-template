@@ -103,14 +103,18 @@ def main(argv=None):
                     run_cron("edit", CRON_ID, "--cron", SCHEDULE, "--tz", TIMEZONE, "--exact", "--enable")
                 # Verify scheduler mutation before committing durable settings.
                 verified = read_job()
-                if bool(verified.get("enabled")) != expected_active:
+                if bool(verified.get("enabled")) != expected_active or (expected_active and verified.get("schedule", {}).get("expr") != SCHEDULE):
                     raise RuntimeError("Cron update was not applied; schedule state unchanged")
                 state = {"mode": args.mode, "anchor_date": (now_kyiv().date() + dt.timedelta(days=1)).isoformat()}
                 save_state(path, state)
             job = read_job()
-            if bool(job.get("enabled")) != expected_active:
-                raise RuntimeError("Cron enabled state failed verification")
+            if bool(job.get("enabled")) != expected_active or (expected_active and job.get("schedule", {}).get("expr") != SCHEDULE):
+                raise RuntimeError("Cron state failed verification")
         if args.action == "due":
+            job = read_job()
+            expected_active = state["mode"] != "off"
+            if bool(job.get("enabled")) != expected_active or (expected_active and job.get("schedule", {}).get("expr") != SCHEDULE):
+                raise RuntimeError("Cron and persisted cadence are inconsistent")
             result = {"due": due_on(state, now_kyiv().date()), "mode": state["mode"]}
         else:
             job = read_job()
