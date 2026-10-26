@@ -69,6 +69,7 @@ def usage() -> str:
   /prorok evidence <event_id>
   /prorok sources
   /prorok health
+  /prorok schedule [daily|3d|7d|off]
   /prorok refresh <event_id> [--to <chat_id>] [--thread-id <topic_id>] [--at 2m] [--no-schedule]
   /prorok refresh-all [--status active] [--limit 50] [--start-at 2m] [--spacing-minutes 3] [--to <chat_id>] [--thread-id <topic_id>] [--no-schedule]
   /prorok add-event ...
@@ -112,6 +113,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if subcommand in {"help", "--help", "-h"}:
         print(usage())
         return 0
+    if subcommand == "schedule":
+        if len(rest) > 1 or (rest and rest[0] not in {"daily", "3d", "7d", "off"}):
+            print("Usage: /prorok schedule [daily|3d|7d|off]", file=sys.stderr)
+            return 2
+        schedule_args = ["set", rest[0]] if rest else ["status"]
+        return run_plain_python(code_dir / "prorok_schedule_cli.py", schedule_args)
     if subcommand in {"health", "status"}:
         return run_python(code_dir / "prorok_cli.py", ["health"], args.home)
     if subcommand in {"list", "events"}:
