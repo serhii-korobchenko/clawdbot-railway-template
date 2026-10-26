@@ -3,6 +3,10 @@ set -euo pipefail
 
 python3 - <<'PY'
 import sqlite3
+import json
+from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from collections import Counter
 
 DB = "/data/workspace/prorok/prorok.sqlite3"
@@ -42,6 +46,25 @@ try:
 
     print("\U0001F52E PROROK — ранкове оновлення")
     print("")
+
+    schedule_path = Path("/data/workspace/prorok/auto_refresh_schedule.json")
+    if schedule_path.is_file():
+        schedule_state = json.loads(schedule_path.read_text(encoding="utf-8"))
+        mode = schedule_state.get("mode", "daily")
+        if mode not in ("daily", "3d", "7d", "off"):
+            raise ValueError("Unknown PROROK schedule mode")
+        if mode == "off":
+            print("Автоматичний пошук вимкнено. Це звіт про поточний стан прогнозів, а не новий refresh.")
+        elif mode in ("3d", "7d"):
+            anchor = schedule_state.get("anchor_date")
+            if not anchor:
+                raise ValueError("Missing schedule anchor date")
+            from datetime import date
+            today = datetime.now(ZoneInfo("Europe/Kyiv")).date()
+            anchor_date = date.fromisoformat(anchor)
+            interval = 3 if mode == "3d" else 7
+            if today < anchor_date or (today - anchor_date).days % interval != 0:
+                print("Сьогодні автоматичний пошук не запланований; нижче наведено останній доступний результат.")
 
     if not events:
         print("Активних подій немає.")
