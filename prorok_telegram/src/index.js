@@ -2071,6 +2071,8 @@ async function candidateForcePreviewPresentation() {
         "Кандидати з нульовою зміною будуть логічно відхилені зі збереженням історії.",
         "Помилки оцінювання не призводять до відхилення Candidate.",
         "Поточні прогнози не змінюються.",
+        preview.temporal_ready === false
+          ? "⚠️ Candidate Force недоступний до встановлення схеми v18 (журнал перевірок часу Evidence)." : "",
         busy ? "Інша пакетна операція вже виконується." : "",
       ].filter(Boolean).join("\n")),
       buttonsBlock([
