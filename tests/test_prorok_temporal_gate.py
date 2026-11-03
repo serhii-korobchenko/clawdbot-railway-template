@@ -95,3 +95,27 @@ def test_review_is_append_only_requires_rationale_and_actor(tmp_path):
     assert c.execute("SELECT COUNT(*) FROM evidence_temporal_reviews").fetchone()[0] == 2
     assert temporal.inspect(c,"evidence",11)["status"]=="already_incorporated"
     c.close()
+
+
+def test_previously_assessed_evidence_is_blocked_even_with_newer_date(tmp_path):
+    c=make_db(tmp_path);install_schema(c)
+    c.executescript("""
+        CREATE TABLE evidence_assessment_decisions(
+            evidence_assessment_decision_id INTEGER PRIMARY KEY,
+            evidence_id INTEGER NOT NULL);
+        INSERT INTO evidence_assessment_decisions VALUES(99,12);
+    """)
+    state=temporal.inspect(c,"evidence",12)
+    assert state["status"] == "already_incorporated"
+    with pytest.raises(ValueError,match="already_incorporated"):
+        temporal.require_allowed(c,"evidence",12)
+    c.close()
+
+
+def test_v18_gate_does_not_mutate_legacy_databases(tmp_path):
+    c=make_db(tmp_path)
+    assert temporal.enforce_if_enabled(c,"evidence",11) is None
+    assert c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "17"
+    with pytest.raises(ValueError):
+        temporal.require_allowed(c,"evidence",11)
+    c.close()
