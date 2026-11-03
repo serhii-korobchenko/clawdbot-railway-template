@@ -337,7 +337,7 @@ def persist_report(
     conn.execute("BEGIN IMMEDIATE")
     try:
         ensure_baseline_current(conn, ctx)
-        temporal.require_allowed(conn,"evidence",ctx.evidence_id,event_id=ctx.event_id)
+        temporal.enforce_if_enabled(conn,"evidence",ctx.evidence_id,event_id=ctx.event_id)
         recommendation_id = conn.execute(
             """INSERT INTO evidence_assessment_recommendations(
                 event_id_snapshot,evidence_id_snapshot,evidence_id,baseline_assessment_id,baseline_probability,
@@ -380,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             require_schema_v13(conn)
             ctx=load_context(conn,a.event_id,a.evidence_id)
             if not a.print_prompt:
-                temporal.require_allowed(conn,"evidence",a.evidence_id,event_id=a.event_id)
+                temporal.enforce_if_enabled(conn,"evidence",a.evidence_id,event_id=a.event_id)
             prompt=build_prompt(ctx)
             if a.print_prompt:
                 print(prompt)
