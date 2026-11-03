@@ -127,13 +127,32 @@ def write_state(directory, run_id, state):
         name = tmp.name
     os.replace(name, path)
 
+def worker_active(directory):
+    lock = directory / "process.lock"
+    if not lock.exists():
+        return False
+    fd = os.open(str(lock), os.O_RDWR)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 def latest_state(directory):
     if not directory.exists():
         return None
     names = sorted(directory.glob("*.json"), reverse=True)
     for name in names:
         try:
-            return json.loads(name.read_text(encoding="utf-8"))
+            result = json.loads(name.read_text(encoding="utf-8"))
+            if result.get("status") in ("starting", "running") and not worker_active(directory):
+                result["status"] = "interrupted"
+            return result
         except (ValueError, OSError):
             continue
     return None
@@ -214,7 +233,7 @@ def main(argv=None):
     if args.command=="preview":
         with connect(db) as conn:
             ids=pending_ids(conn)
-        print(json.dumps({"pending":len(ids),"limit":MAX_ITEMS,"can_start":len(ids)<=MAX_ITEMS}))
+        print(json.dumps({"pending":len(ids),"limit":MAX_ITEMS,"can_start":len(ids)<=MAX_ITEMS and not worker_active(args.runs_dir)}))
         return 0
     if args.command=="_worker":
         # Keep the inherited lock descriptor; opening process.lock a second time
@@ -238,7 +257,12 @@ def main(argv=None):
         print(json.dumps({"status":"too_many","pending":len(ids),"limit":MAX_ITEMS}))
         os.close(fd)
         return 2
+    if not ids:
+        os.close(fd)
+        print(json.dumps({"status":"empty","pending":0}))
+        return 0
     run_id=dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")+"-"+uuid.uuid4().hex[:8]
+    write_state(args.runs_dir,run_id,{"run_id":run_id,"status":"starting","started_at":utcnow(),"total":len(ids)})
     command=[sys.executable,str(Path(__file__).resolve()),"--db",str(db),
              "--runs-dir",str(args.runs_dir),"_worker",run_id,"--actor",args.actor,"--lock-fd",str(fd)]
     try:
@@ -246,6 +270,9 @@ def main(argv=None):
         with open(os.devnull,"wb") as null:
             child=subprocess.Popen(command,stdin=null,stdout=null,stderr=null,
                                    start_new_session=True,pass_fds=(fd,))
+    except OSError as exc:
+        write_state(args.runs_dir,run_id,{"run_id":run_id,"status":"failed","error":str(exc)[:200],"finished_at":utcnow()})
+        raise
     finally:
         os.close(fd)
     print(json.dumps({"status":"started","run_id":run_id,"pid":child.pid,
