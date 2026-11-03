@@ -58,7 +58,8 @@ jobs:
             tests/test_prorok_telegram_status_ui.py \
             tests/test_prorok_telegram_history_ui.py \
             tests/test_prorok_daily_status.py \
-            tests/test_prorok_candidate_force.py
+            tests/test_prorok_candidate_force.py \
+            tests/test_prorok_temporal_gate.py
 
       - name: Validate Telegram plugin syntax
         run: node --check prorok_telegram/src/index.js
