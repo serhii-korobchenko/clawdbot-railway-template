@@ -55,7 +55,23 @@ class EvidenceProrokAppDTO(BaseModel):
     changed_at: str | None = None
 
 
+class EvidenceTemporalDTO(BaseModel):
+    target_type: Literal["evidence","candidate"]
+    target_id: int
+    event_id: str
+    published_at: str | None
+    ingested_at: str | None
+    latest_assessed_at: str
+    latest_assessment_id: int
+    status: Literal["newer_publication","review_required","unknown_date","verified_new","already_incorporated"]
+    automated_reassessment_allowed: bool
+    review_id: int | None
+    review_decision: Literal["verified_new","already_incorporated"] | None
+    review_rationale: str | None
+
+
 class EvidenceListItemDTO(BaseModel):
+    temporal: EvidenceTemporalDTO | None = None
     evidence_id: int
     run_id: int | None
     created_at: str
