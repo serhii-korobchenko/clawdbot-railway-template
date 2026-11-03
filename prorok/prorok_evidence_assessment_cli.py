@@ -44,7 +44,7 @@ def main():
         if cur is None: raise RuntimeError("event has no current assessment")
         if int(cur["assessment_id"])!=a.baseline_assessment_id:
             raise RuntimeError(f"stale baseline: expected assessment_id={a.baseline_assessment_id}, current={cur['assessment_id']}")
-        temporal.require_allowed(c,"evidence",a.evidence_id,event_id=a.event_id)
+        temporal.enforce_if_enabled(c,"evidence",a.evidence_id,event_id=a.event_id)
         baseline=int(cur["probability_percent"])
         recommendation_id=None
         if a.recommendation_id is not None:
