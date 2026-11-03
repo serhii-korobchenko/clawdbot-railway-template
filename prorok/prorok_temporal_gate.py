@@ -108,7 +108,7 @@ def inspect(conn, kind, item_id, *, event_id=None):
     classification=classify_publication(row["published_at"], baseline["assessed_at"])
     review=latest_review(conn,kind,item_id,baseline_id)
     decision=review["decision"] if review is not None else None
-    if _already_assessed(conn, kind, item_id):
+    if _already_assessed(conn, kind, item_id) or decision == "already_incorporated":
         status = "already_incorporated"
         allowed = False
     elif classification == "newer_publication":
