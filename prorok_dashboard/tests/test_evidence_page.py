@@ -245,3 +245,65 @@ def test_candidate_evidence_defaults_to_pending(logged_in_client):
     assert response.status_code == 200
     assert "Pending accepted" in response.text
     assert "Already processed" not in response.text
+
+
+def test_candidate_ids_and_preliminary_recommendation_in_dashboard(logged_in_client):
+    async def list_candidate_evidence(**kwargs):
+        return {"items": [{
+            "candidate_id": 127, "ordinal": 2, "refresh_id": 5,
+            "event_id": "event-1", "event_title": "Test event",
+            "direction": "indicator", "strength": "strong",
+            "validation_state": "accepted", "summary": "New signal",
+            "relevance": 85, "credibility": 90, "decision_type": None,
+            "review_decision_type": None, "promotion_action": None,
+            "evidence_id": None, "source": "Source", "url": "https://example.com",
+            "preliminary_recommendation": {
+                "candidate_assessment_recommendation_id": 501,
+                "baseline_probability": 40, "recommended_probability": 55,
+                "probability_delta": 15, "recommendation_confidence": "medium",
+                "recommendation_rationale": "New corroborating information",
+                "delta_justification": "Material effect", "is_stale": False,
+                "status": "ready", "created_at": "2026-11-03T12:00:00Z",
+            },
+        }], "total": 1, "filtered_total": 1}
+
+    logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
+    response = logged_in_client.get("/evidence?tab=candidates")
+    assert response.status_code == 200
+    assert "Candidate #127" in response.text
+    assert "Candidate #2" not in response.text
+    assert "Recommendation #501" in response.text
+    assert "40%" in response.text and "55%" in response.text
+    assert "+15 п.п." in response.text
+    assert "New corroborating information" in response.text
+    assert "Candidate не є official Evidence" in response.text
+
+
+def test_candidate_without_assessment_and_stale_candidate(logged_in_client):
+    async def list_candidate_evidence(**kwargs):
+        return {"items": [
+            {"candidate_id": 128, "ordinal": 1, "refresh_id": 5,
+             "event_id": "event-1", "event_title": "Test event",
+             "direction": "indicator", "validation_state": "accepted",
+             "preliminary_recommendation": None, "review_decision_type": None,
+             "decision_type": None, "promotion_action": None, "evidence_id": None},
+            {"candidate_id": 129, "ordinal": 2, "refresh_id": 5,
+             "event_id": "event-1", "event_title": "Test event",
+             "direction": "counterindicator", "validation_state": "accepted",
+             "review_decision_type": None, "decision_type": None,
+             "promotion_action": None, "evidence_id": None,
+             "preliminary_recommendation": {
+                 "candidate_assessment_recommendation_id": 502,
+                 "baseline_probability": 40, "recommended_probability": 35,
+                 "probability_delta": -5, "recommendation_confidence": "low",
+                 "recommendation_rationale": "Older analysis",
+                 "delta_justification": "Uncertain",
+                 "is_stale": True, "status": "ready", "created_at": None,
+             }},
+        ], "total": 2, "filtered_total": 2}
+    logged_in_client.app.state.prorok_api.list_candidate_evidence = list_candidate_evidence
+    response = logged_in_client.get("/evidence?tab=candidates")
+    assert response.status_code == 200
+    assert "Попередню AI-оцінку ще не сформовано" in response.text
+    assert "застаріла / потребує переоцінювання" in response.text
+    assert "Candidate #128" in response.text and "Candidate #129" in response.text
