@@ -4,6 +4,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from prorok import prorok_temporal_gate as temporal_gate
+
 
 _ACTIVITY_WINDOWS = {"7d": timedelta(days=7), "30d": timedelta(days=30), "all": None}
 
@@ -50,6 +52,12 @@ def list_evidence(conn: sqlite3.Connection, *, event_id: str | None = None, dire
     for r in rows:
         manual=r["manual_decision_id"] is not None; bp=r["manual_baseline_probability"] if manual else r["baseline_probability"]; sp=r["manual_selected_probability"] if manual else r["selected_probability"]
         items.append({"evidence_id":r["evidence_id"],"run_id":r["run_id"],"created_at":r["created_at"],"direction":r["direction"],"strength":r["strength"],"summary":r["summary"],"relevance":r["relevance"],"credibility":r["credibility"],"event":{"event_id":r["event_id"],"title":r["event_title"],"status":r["event_status"]},"source":{"source_id":r["source_id"],"title":r["source_title"],"domain":r["domain"],"url":r["url"],"canonical_url":r["canonical_url"],"published_at":r["published_at"],"source_type":r["source_type"]},"assessment":{"status":("unknown" if (not manual and r["decision_id"] is None) else ("assessed_unchanged" if int(sp)==int(bp) else "assessed_changed")),"provenance_type":"evidence_manual" if manual else ("refresh" if r["decision_id"] is not None else None),"evidence_assessment_decision_id":r["manual_decision_id"],"refresh_id":None if manual else r["refresh_id"],"refresh_event_result_id":None if manual else r["refresh_event_result_id"],"decision_id":None if manual else r["decision_id"],"decision_type":"evidence_manual" if manual else r["decision_type"],"baseline_probability":bp,"selected_probability":sp,"assessment_id":r["manual_assessment_id"] if manual else r["assessment_id"],"decided_at":r["manual_decided_at"] if manual else r["decided_at"]},"prorok_app":{"state":r["prorok_app_state"],"source":r["prorok_app_source"],"actor":r["prorok_app_actor"],"changed_at":r["prorok_app_changed_at"]}})
+    for item in items:
+        try:
+            item["temporal"] = temporal_gate.inspect(
+                conn,"evidence",int(item["evidence_id"]),event_id=item["event"]["event_id"])
+        except ValueError:
+            item["temporal"] = None
     return {"items":items,"total":int(total),"filtered_total":len(items)}
 
 
