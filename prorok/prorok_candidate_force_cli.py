@@ -179,6 +179,8 @@ def run_worker(db, directory, run_id, actor):
     write_state(directory, run_id, state)
     try:
         with connect(db) as conn:
+            if not temporal._table_exists(conn,"evidence_temporal_reviews"):
+                raise ValueError("Candidate Force requires schema v18 temporal reviews")
             ids = pending_ids(conn)
         state["total"] = len(ids)
         write_state(directory, run_id, state)
@@ -238,7 +240,10 @@ def main(argv=None):
     if args.command=="preview":
         with connect(db) as conn:
             ids=pending_ids(conn)
-        print(json.dumps({"pending":len(ids),"limit":MAX_ITEMS,"can_start":len(ids)<=MAX_ITEMS and not worker_active(args.runs_dir)}))
+        with connect(db) as conn:
+            temporal_ready = temporal._table_exists(conn,"evidence_temporal_reviews")
+        print(json.dumps({"pending":len(ids),"limit":MAX_ITEMS,"temporal_ready":temporal_ready,
+                          "can_start":temporal_ready and len(ids)<=MAX_ITEMS and not worker_active(args.runs_dir)}))
         return 0
     if args.command=="_worker":
         # Keep the inherited lock descriptor; opening process.lock a second time
@@ -266,6 +271,11 @@ def main(argv=None):
         os.close(fd)
         print(json.dumps({"status":"empty","pending":0}))
         return 0
+    with connect(db) as conn:
+        if not temporal._table_exists(conn,"evidence_temporal_reviews"):
+            os.close(fd)
+            print(json.dumps({"status":"requires_schema_v18","pending":len(ids)}))
+            return 2
     run_id=dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")+"-"+uuid.uuid4().hex[:8]
     write_state(args.runs_dir,run_id,{"run_id":run_id,"status":"starting","started_at":utcnow(),"total":len(ids)})
     command=[sys.executable,str(Path(__file__).resolve()),"--db",str(db),
