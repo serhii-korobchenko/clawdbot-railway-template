@@ -21,10 +21,12 @@ import tempfile
 import uuid
 
 try:
+    from . import prorok_candidate_review_cli as review
     from .prorok_candidate_review_cli import require_v16
     from .prorok_evidence_recommendation_cli import connect, resolve_db
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import prorok_candidate_review_cli as review
     from prorok_candidate_review_cli import require_v16
     from prorok_evidence_recommendation_cli import connect, resolve_db
 
@@ -73,6 +75,43 @@ def load_recommendation(conn, candidate_id, recommendation_id):
     if not assessment:
         raise ValueError("Event assessment missing")
     return row, int(assessment[0])
+
+def apply_atomic_decision(db, candidate_id, recommendation_id, run_id):
+    """Revalidate and finalize under one SQLite write transaction."""
+    with connect(db) as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            require_v16(conn)
+            x = review.load_candidate(conn, candidate_id)
+            if x["validation_state"] != "accepted":
+                raise ValueError("Candidate is not quarantine-accepted")
+            if review.existing_decision(conn, candidate_id) or review.existing_promotion(conn, candidate_id):
+                raise ValueError("Candidate already reviewed or promoted")
+            old = conn.execute("SELECT decision_id FROM refresh_user_decisions WHERE refresh_event_result_id=?",
+                               (int(x["refresh_event_result_id"]),)).fetchone()
+            if old:
+                raise ValueError("Candidate refresh result already finalized")
+            rec, baseline_id = load_recommendation(conn, candidate_id, recommendation_id)
+            decision = classify_recommendation(rec, baseline_id)
+            now = review.utc_now()
+            cursor = conn.execute("""
+                INSERT INTO candidate_review_decisions
+                (candidate_id,event_id_snapshot,decision_type,recommendation_id,decision_source,actor,decided_at)
+                VALUES(?,?,?,?,?,?,?)
+            """, (candidate_id,str(x["event_id"]),decision,recommendation_id,
+                  "system",f"candidate_force:{run_id}",now))
+            evidence_id = None
+            if decision == "accept":
+                official_run_id = review.create_run(conn,candidate_id,"system")
+                evidence_id, _, new_source = review.promote(
+                    conn,x,int(cursor.lastrowid),official_run_id,now)
+                review.finish_run(conn,official_run_id,1 if new_source else 0)
+            conn.commit()
+            return {"decision":decision,"delta":int(rec["probability_delta"]),
+                    "evidence_id":evidence_id}
+        except Exception:
+            conn.rollback()
+            raise
 
 def utcnow():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -133,16 +172,11 @@ def run_worker(db, directory, run_id, actor):
                 output = subprocess_checked([sys.executable,str(RECOMMEND),str(candidate_id),"--db",str(db)], 240)
                 rid = recommendation_id(output)
                 state["evaluated"] += 1
-                with connect(db) as conn:
-                    row, current_id = load_recommendation(conn, candidate_id, rid)
-                    decision = classify_recommendation(row, current_id)
-                    delta = int(row["probability_delta"])
-                # Transactional decision writer rejects duplicate reviews and promotions.
-                subprocess_checked([sys.executable,str(REVIEW),"--db",str(db),"decide",
-                    str(candidate_id),decision,"--recommendation-id",str(rid),
-                    "--source","system","--actor",f"candidate_force:{run_id}"], 45)
+                outcome = apply_atomic_decision(db,candidate_id,rid,run_id)
+                decision = outcome["decision"]
                 entry.update({"result":"promoted" if decision=="accept" else "rejected",
-                              "recommendation_id":rid,"delta":delta})
+                              "recommendation_id":rid,"delta":outcome["delta"],
+                              "evidence_id":outcome["evidence_id"]})
                 state["promoted" if decision=="accept" else "rejected"] += 1
             except (OSError, sqlite3.Error, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 # Never promote/reject a candidate whose assessment is unverified.
