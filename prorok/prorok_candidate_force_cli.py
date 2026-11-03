@@ -21,11 +21,13 @@ import tempfile
 import uuid
 
 try:
+    from . import prorok_temporal_gate as temporal
     from . import prorok_candidate_review_cli as review
     from .prorok_candidate_review_cli import require_v16
     from .prorok_evidence_recommendation_cli import connect, resolve_db
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import prorok_temporal_gate as temporal
     import prorok_candidate_review_cli as review
     from prorok_candidate_review_cli import require_v16
     from prorok_evidence_recommendation_cli import connect, resolve_db
@@ -91,6 +93,7 @@ def apply_atomic_decision(db, candidate_id, recommendation_id, run_id):
                                (int(x["refresh_event_result_id"]),)).fetchone()
             if old:
                 raise ValueError("Candidate refresh result already finalized")
+            temporal.require_allowed(conn,"candidate",candidate_id,event_id=str(x["event_id"]))
             rec, baseline_id = load_recommendation(conn, candidate_id, recommendation_id)
             decision = classify_recommendation(rec, baseline_id)
             now = review.utc_now()
@@ -188,6 +191,8 @@ def run_worker(db, directory, run_id, actor):
                         entry["result"]="skipped";state["skipped"]+=1
                         state["results"].append(entry);write_state(directory, run_id, state)
                         continue
+                with connect(db) as conn:
+                    temporal.require_allowed(conn,"candidate",candidate_id)
                 output = subprocess_checked([sys.executable,str(RECOMMEND),str(candidate_id),"--db",str(db)], 240)
                 rid = recommendation_id(output)
                 state["evaluated"] += 1
