@@ -27,7 +27,12 @@ def migrate(conn):
         raise ValueError("expected schema_version=17")
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_temporal_reviews'").fetchone():
         raise ValueError("temporal review table already exists")
-    conn.executescript(DDL)
+    # sqlite3.executescript() commits any active transaction implicitly.
+    # Execute DDL statements individually under a single explicit write lock.
+    conn.execute("BEGIN IMMEDIATE")
+    for statement in DDL.split(";"):
+        if statement.strip():
+            conn.execute(statement)
     conn.execute("UPDATE meta SET value='18' WHERE key='schema_version'")
     if conn.execute("PRAGMA foreign_key_check").fetchall():
         raise RuntimeError("foreign key validation failed")
