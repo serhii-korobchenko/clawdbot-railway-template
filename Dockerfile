@@ -26,6 +26,10 @@ WORKDIR /openclaw
 ARG OPENCLAW_GIT_REF=v2026.5.22
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
+# Backport upstream PR #97174 for Telegram plugin callback routing on v2026.5.22.
+COPY scripts/apply-openclaw-telegram-callback-backport.py /tmp/apply-openclaw-telegram-callback-backport.py
+RUN python3 /tmp/apply-openclaw-telegram-callback-backport.py /openclaw
+
 # Disable pnpm minimum release age gate for OpenClaw source build.
 # OpenClaw's workspace config can override global pnpm config, so patch both the
 # project config and pnpm-workspace.yaml before running pnpm install.

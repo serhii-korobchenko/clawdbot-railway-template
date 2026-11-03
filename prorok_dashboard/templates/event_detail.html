@@ -66,8 +66,8 @@
       <span class="count-pill">{{ data.evidence|length }}</span>
     </div>
     <div class="info-note">
-      Evidence зберігається на рівні події. Поточна модель даних не дозволяє
-      достовірно прив’язати окремий evidence до конкретної оцінки.
+      Для evidence з refresh lifecycle показано фінальне рішення та пов’язану оцінку.
+      Для legacy/manual evidence, де такого provenance немає, статус оцінки позначено як невідомий.
     </div>
     {% if data.evidence %}
     <div class="timeline">

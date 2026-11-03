@@ -1,0 +1,8 @@
+{
+  "id": "reel-telegram",
+  "name": "Reel Analyzer Telegram Router",
+  "description": "Deterministic Telegram topic router for Instagram Reel analysis.",
+  "version": "0.1.0",
+  "configSchema": {"type":"object","properties":{},"additionalProperties":false},
+  "activation": {"onStartup": true}
+}

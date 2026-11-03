@@ -15,6 +15,10 @@
       <a class="brand" href="/">PROROK</a>
       <span class="brand-subtitle">Forecasting Dashboard</span>
       {% if request.session.get('prorok_authenticated') %}
+      <nav class="main-nav" aria-label="Основна навігація">
+        <a href="/">Події</a>
+        <a href="/evidence">Evidence</a>
+      </nav>
       <form method="post" action="/logout" class="logout-form">
         <button class="link-button" type="submit">Вийти</button>
       </form>

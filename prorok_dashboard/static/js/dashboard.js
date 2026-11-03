@@ -66,6 +66,159 @@
     });
   }
 
+  function renderEvidenceActivityChart() {
+    const canvas = document.getElementById("evidence-activity-chart");
+    const dataNode = document.getElementById("activity-chart-data");
+
+    if (!canvas || !dataNode || typeof Chart === "undefined") {
+      return;
+    }
+
+    let points = [];
+    try {
+      points = JSON.parse(dataNode.dataset.points || "[]");
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(points) || points.length === 0) {
+      return;
+    }
+
+    const truncate = (value, max = 44) => {
+      const text = String(value || "");
+      return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+    };
+
+    const isMobile = window.matchMedia("(max-width: 760px)").matches;
+    const wrapper = canvas.closest(".activity-chart-wrap");
+    if (wrapper) {
+      const rowHeight = isMobile ? 44 : 54;
+      const minHeight = isMobile ? 280 : 320;
+      wrapper.style.height = `${Math.max(minHeight, points.length * rowHeight)}px`;
+    }
+
+    new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: points.map((point) => point.title),
+        datasets: [
+          { label: "🟢 Indicator", data: points.map((point) => point.indicator_count), stack: "activity" },
+          { label: "🔴 Counterindicator", data: points.map((point) => point.counterindicator_count), stack: "activity" },
+          { label: "⚪ Neutral", data: points.map((point) => point.neutral_count), stack: "activity" },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            stacked: true,
+            ticks: {
+              precision: 0,
+            },
+            title: {
+              display: true,
+              text: "Кількість official evidence",
+            },
+          },
+          y: {
+            stacked: true,
+            ticks: {
+              autoSkip: false,
+              callback(value, index) {
+                if (isMobile) {
+                  return String(index + 1);
+                }
+                return truncate(this.getLabelForValue(value));
+              },
+            },
+          },
+        },
+        plugins: {
+          legend: { display: true, position: "bottom" },
+          tooltip: {
+            mode: "index",
+            intersect: false,
+            callbacks: {
+              title: (items) => {
+                const point = points[items[0]?.dataIndex] || {};
+                return point.title || "";
+              },
+              label: (context) => `${context.dataset.label}: ${context.raw}`,
+              afterBody: (items) => {
+                const point = points[items[0]?.dataIndex] || {};
+                return [
+                  `Усього: ${point.evidence_count ?? 0}`,
+                  `Останнє evidence: ${point.latest_evidence_at || "—"}`,
+                ];
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+
+  function renderCandidateActivityChart() {
+    const canvas = document.getElementById("candidate-activity-chart");
+    const dataNode = document.getElementById("candidate-activity-chart-data");
+    if (!canvas || !dataNode || typeof Chart === "undefined") return;
+    let points = [];
+    try { points = JSON.parse(dataNode.dataset.points || "[]"); } catch { return; }
+    if (!Array.isArray(points) || points.length === 0) return;
+
+    const eventIds = [...new Set(points.map((p) => p.event_id))];
+    const labels = [...new Set(points.map((p) => p.refresh_id))];
+    const byKey = new Map(points.map((p) => [`${p.event_id}:${p.refresh_id}`, p]));
+    const datasets = eventIds.map((eventId) => {
+      const sample = points.find((p) => p.event_id === eventId) || {};
+      return {
+        label: sample.event_title || eventId,
+        data: labels.map((refreshId) => byKey.get(`${eventId}:${refreshId}`)?.candidate_count ?? null),
+        tension: 0,
+        fill: false,
+      };
+    });
+
+    new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: labels.map((id) => {
+          const point = points.find((p) => p.refresh_id === id) || {};
+          const date = point.started_at ? new Date(point.started_at) : null;
+          const dateLabel = date && !Number.isNaN(date.getTime())
+            ? date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" })
+            : "—";
+          return `${dateLabel} · #${id}`;
+        }),
+        datasets
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: "Кількість candidates" } } },
+        plugins: {
+          legend: { display: eventIds.length > 1, position: "bottom" },
+          tooltip: { callbacks: {
+            afterLabel: (context) => {
+              const eventId = eventIds[context.datasetIndex];
+              const refreshId = labels[context.dataIndex];
+              const point = byKey.get(`${eventId}:${refreshId}`) || {};
+              const date = point.started_at ? new Date(point.started_at) : null;
+              const fullDate = date && !Number.isNaN(date.getTime())
+                ? date.toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                : "—";
+              return [`Refresh #${refreshId} · ${fullDate}`];
+            }
+          }}
+        }
+      }
+    });
+  }
+
   function syncFilterUrl({ push = false } = {}) {
     const statusField = document.getElementById("status-field");
     const searchField = document.getElementById("event-search");
@@ -127,9 +280,15 @@
     }
   });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", renderProbabilityChart);
-  } else {
+  const renderCharts = () => {
     renderProbabilityChart();
+    renderEvidenceActivityChart();
+    renderCandidateActivityChart();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderCharts);
+  } else {
+    renderCharts();
   }
 })();
