@@ -97,7 +97,23 @@ class EvidenceActivityResponse(BaseModel):
     items: list[EvidenceActivityItemDTO]
 
 
+class CandidatePreliminaryRecommendationDTO(BaseModel):
+    candidate_assessment_recommendation_id: int
+    baseline_assessment_id: int
+    baseline_probability: int
+    recommended_probability: int
+    probability_delta: int
+    recommendation_confidence: Literal["low", "medium", "high"]
+    recommendation_rationale: str
+    delta_justification: str
+    change_from_baseline: Literal["increase", "decrease", "no_update"]
+    created_at: str
+    status: Literal["ready", "stale", "error"]
+    is_stale: bool
+
+
 class CandidateEvidenceDTO(BaseModel):
+    preliminary_recommendation: CandidatePreliminaryRecommendationDTO | None = None
     candidate_id: int
     refresh_event_result_id: int
     refresh_id: int
