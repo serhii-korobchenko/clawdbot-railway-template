@@ -23,6 +23,7 @@ const DELETE_CLI = process.env.PROROK_DELETE_CLI || "/app/prorok/prorok_delete_c
 const STATUS_CLI = process.env.PROROK_STATUS_CLI || "/app/prorok/prorok_event_status_cli.py";
 const REFRESH_ALL_CLI = process.env.PROROK_REFRESH_ALL_CLI || "/app/prorok/prorok_refresh_all_dry_run_quiet.py";
 const SCHEDULE_CLI = process.env.PROROK_SCHEDULE_CLI || "/app/prorok/prorok_schedule_cli.py";
+const CANDIDATE_FORCE_CLI = process.env.PROROK_CANDIDATE_FORCE_CLI || "/app/prorok/prorok_candidate_force_cli.py";
 const PROROK_DB_PATH = process.env.PROROK_DB_PATH || "/data/workspace/prorok/prorok.sqlite3";
 const PYTHON_BIN = process.env.PROROK_PYTHON_BIN || "python3";
 const CANDIDATE_REVIEW_CLI = "prorok/prorok_candidate_review_cli.py";
@@ -2049,6 +2050,101 @@ async function scheduleApplyPresentation(mode) {
   return await schedulePresentation();
 }
 
+async function candidateForceCli(action, extra = []) {
+  const { stdout } = await execFileAsync(PYTHON_BIN, [
+    CANDIDATE_FORCE_CLI, "--db", PROROK_DB_PATH, action, ...extra,
+  ], { timeout: 30000, maxBuffer: 256 * 1024, env: process.env });
+  return JSON.parse(stdout.trim());
+}
+
+async function candidateForcePreviewPresentation() {
+  const preview = await candidateForceCli("preview");
+  const latest = await candidateForceCli("status");
+  const busy = latest.status === "running" || latest.status === "starting";
+  return {
+    title: "⚡ Candidate Force",
+    tone: "neutral",
+    blocks: [
+      textBlock([
+        `Необроблених Candidate: ${preview.pending}`,
+        "Кандидати з ненульовою рекомендованою зміною перейдуть до official Evidence.",
+        "Кандидати з нульовою зміною будуть логічно відхилені зі збереженням історії.",
+        "Помилки оцінювання не призводять до відхилення Candidate.",
+        "Поточні прогнози не змінюються.",
+        busy ? "Інша пакетна операція вже виконується." : "",
+      ].filter(Boolean).join("\\n")),
+      buttonsBlock([
+        ...(!busy && preview.can_start && preview.pending > 0
+          ? [button("⚡ Перевірити й підтвердити", "candidate-force-confirm", "primary")]
+          : []),
+        button("📊 Статус останнього запуску", "candidate-force-status"),
+      ]),
+      buttonsBlock([button("◀️ Керування", "manage")]),
+    ],
+  };
+}
+
+async function candidateForceConfirmPresentation() {
+  const preview = await candidateForceCli("preview");
+  if (!preview.can_start || preview.pending < 1) return await candidateForcePreviewPresentation();
+  return {
+    title: "⚡ Підтвердити Candidate Force",
+    tone: "neutral",
+    blocks: [
+      textBlock(`Пакетна AI-оцінка ${preview.pending} Candidate може тривати кілька хвилин. Прийняті Candidate створять official Evidence, відхилені залишаться в аудиті. Прогнози не змінюються.\\n\\nПідтвердити запуск?`),
+      buttonsBlock([
+        button("✅ Запустити Candidate Force", "candidate-force-apply", "success", false),
+        button("❌ Скасувати", "candidate-force"),
+      ]),
+    ],
+  };
+}
+
+async function candidateForceApplyPresentation(ctx) {
+  const actor = telegramActorSnapshot(ctx);
+  const args = actor ? ["--actor", String(actor)] : [];
+  const result = await candidateForceCli("start", args);
+  return {
+    title: "⚡ Candidate Force",
+    tone: "neutral",
+    blocks: [
+      textBlock(result.status === "started"
+        ? `Пакет запущено. ID: ${result.run_id}\\nCandidate у черзі: ${result.pending}\\nПеревіряй хід виконання через кнопку статусу.`
+        : `Результат запуску: ${result.status || "невідомо"}`),
+      buttonsBlock([button("📊 Перевірити статус", "candidate-force-status", "primary")]),
+      buttonsBlock([button("◀️ Керування", "manage")]),
+    ],
+  };
+}
+
+async function candidateForceStatusPresentation() {
+  const state = await candidateForceCli("status");
+  const results = Array.isArray(state.results) ? state.results : [];
+  return {
+    title: "📊 Candidate Force · Статус",
+    tone: "neutral",
+    blocks: [
+      textBlock(state.status === "never_run"
+        ? "Пакетних запусків ще не було."
+        : [
+            `Run: ${state.run_id || "—"}`,
+            `Стан: ${state.status || "—"}`,
+            `Всього: ${state.total || 0} · Оцінено: ${state.evaluated || 0}`,
+            `До Evidence: ${state.promoted || 0} · Відхилено: ${state.rejected || 0}`,
+            `Пропущено: ${state.skipped || 0} · Помилки: ${state.failed || 0}`,
+            `Початок: ${state.started_at || "—"}`,
+            `Завершено: ${state.finished_at || "—"}`,
+            ...results.filter((x) => x.result === "failed").slice(0, 5).map((x) =>
+              `Помилка #${x.candidate_id}: ${shortText(x.error || "невідома", 140)}`),
+          ].join("\\n")),
+      buttonsBlock([
+        button("🔄 Оновити статус", "candidate-force-status"),
+        button("◀️ До Candidate Force", "candidate-force"),
+      ]),
+    ],
+  };
+}
+
 function managePresentation() {
   return {
     title: "⚙️ Керування",
@@ -2062,6 +2158,7 @@ function managePresentation() {
       buttonsBlock([button("🎯 Рекомендації", "recommendations")]),
       buttonsBlock([button("🔄 Запустити перевірку", "refresh-run", "primary")]),
       buttonsBlock([button("🕒 Автоматичне оновлення", "schedule")]),
+      buttonsBlock([button("⚡ Candidate Force", "candidate-force", "primary")]),
       buttonsBlock([button("🏠 Головне меню", "home")]),
     ],
   };
@@ -2540,6 +2637,10 @@ async function renderPayload(payload, ctx = null) {
     return await archivePresentation(Number.parseInt(rawPage, 10));
   }
   if (payload === "manage") return managePresentation();
+  if (payload === "candidate-force") return await candidateForcePreviewPresentation();
+  if (payload === "candidate-force-confirm") return await candidateForceConfirmPresentation();
+  if (payload === "candidate-force-apply") return await candidateForceApplyPresentation(ctx);
+  if (payload === "candidate-force-status") return await candidateForceStatusPresentation();
   if (payload === "schedule") return await schedulePresentation();
   if (payload.startsWith("schedule-confirm:")) return scheduleConfirmPresentation(payload.slice("schedule-confirm:".length));
   if (payload.startsWith("schedule-apply:")) return await scheduleApplyPresentation(payload.slice("schedule-apply:".length));
