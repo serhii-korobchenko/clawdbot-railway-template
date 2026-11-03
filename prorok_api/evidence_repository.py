@@ -67,6 +67,69 @@ def list_candidate_evidence(conn: sqlite3.Connection, *, event_id: str | None = 
     rows=conn.execute(f"""SELECT c.candidate_id,c.refresh_event_result_id,rer.refresh_id,rer.event_id,rer.event_title_snapshot,c.ordinal,c.direction,c.strength,c.relevance,c.credibility,c.title,c.source,c.url,c.published_at,c.summary,c.why_it_matters,c.duplicate_risk,c.freshness,c.validation_state,c.rejection_reason,c.created_at,d.decision_id,d.decision_type,d.selected_probability,d.decided_at,crd.candidate_review_decision_id,crd.decision_type AS review_decision_type,crd.decided_at AS review_decided_at,p.promotion_action,p.evidence_id AS promoted_evidence_id,p.promoted_at FROM refresh_candidate_evidence c JOIN refresh_event_results rer ON rer.refresh_event_result_id=c.refresh_event_result_id LEFT JOIN refresh_user_decisions d ON d.refresh_event_result_id=c.refresh_event_result_id LEFT JOIN candidate_review_decisions crd ON crd.candidate_id=c.candidate_id LEFT JOIN refresh_candidate_promotions p ON p.candidate_id=c.candidate_id {where_sql} ORDER BY c.created_at {od},c.candidate_id {od}""",params).fetchall()
     total=conn.execute("SELECT COUNT(*) AS n FROM refresh_candidate_evidence").fetchone()["n"]
     items=[{"candidate_id":r["candidate_id"],"refresh_event_result_id":r["refresh_event_result_id"],"refresh_id":r["refresh_id"],"event_id":r["event_id"],"event_title":r["event_title_snapshot"],"ordinal":r["ordinal"],"direction":r["direction"],"strength":r["strength"],"relevance":r["relevance"],"credibility":r["credibility"],"title":r["title"],"source":r["source"],"url":r["url"],"published_at":r["published_at"],"summary":r["summary"],"why_it_matters":r["why_it_matters"],"duplicate_risk":r["duplicate_risk"],"freshness":r["freshness"],"validation_state":r["validation_state"],"rejection_reason":r["rejection_reason"],"created_at":r["created_at"],"decision_id":r["decision_id"],"decision_type":r["decision_type"],"selected_probability":r["selected_probability"],"decided_at":r["decided_at"],"candidate_review_decision_id":r["candidate_review_decision_id"],"review_decision_type":r["review_decision_type"],"review_decided_at":r["review_decided_at"],"promotion_action":r["promotion_action"],"evidence_id":r["promoted_evidence_id"],"promoted_at":r["promoted_at"]} for r in rows]
+    # Enrich quarantine Candidates with their latest persisted preliminary AI
+    # assessment. These values are read-only and never imply official promotion.
+    # Legacy databases can legitimately lack the v16 recommendation table.
+    if items and conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='candidate_assessment_recommendations'"
+    ).fetchone():
+        ids = [int(item["candidate_id"]) for item in items]
+        marks = ",".join("?" for _ in ids)
+        recs = conn.execute(f"""
+            SELECT ranked.* FROM (
+                SELECT r.*, ROW_NUMBER() OVER (
+                    PARTITION BY r.candidate_id
+                    ORDER BY r.created_at DESC,r.candidate_assessment_recommendation_id DESC
+                ) AS row_number
+                FROM candidate_assessment_recommendations r
+                WHERE r.candidate_id IN ({marks})
+            ) ranked WHERE ranked.row_number=1
+        """, ids).fetchall()
+        by_candidate = {int(r["candidate_id"]): r for r in recs}
+        current = {}
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='assessments'"
+        ).fetchone():
+            event_ids = sorted({str(item["event_id"]) for item in items if item["event_id"]})
+            if event_ids:
+                emarks = ",".join("?" for _ in event_ids)
+                current = {
+                    str(r["event_id"]): int(r["assessment_id"])
+                    for r in conn.execute(f"""
+                        SELECT a.event_id,a.assessment_id FROM assessments a
+                        WHERE a.event_id IN ({emarks})
+                        AND a.assessment_id=(
+                            SELECT a2.assessment_id FROM assessments a2
+                            WHERE a2.event_id=a.event_id
+                            ORDER BY a2.assessed_at DESC,a2.assessment_id DESC LIMIT 1
+                        )
+                    """, event_ids).fetchall()
+                }
+        for item in items:
+            r = by_candidate.get(int(item["candidate_id"]))
+            if r is None:
+                item["preliminary_recommendation"] = None
+                continue
+            baseline_now = current.get(str(item["event_id"]))
+            stale = (r["status"] != "ready" or baseline_now is None
+                     or int(r["baseline_assessment_id"]) != baseline_now)
+            item["preliminary_recommendation"] = {
+                "candidate_assessment_recommendation_id": int(r["candidate_assessment_recommendation_id"]),
+                "baseline_assessment_id": int(r["baseline_assessment_id"]),
+                "baseline_probability": int(r["baseline_probability"]),
+                "recommended_probability": int(r["recommended_probability"]),
+                "probability_delta": int(r["probability_delta"]),
+                "recommendation_confidence": str(r["recommendation_confidence"]),
+                "recommendation_rationale": str(r["recommendation_rationale"]),
+                "delta_justification": str(r["delta_justification"]),
+                "change_from_baseline": str(r["change_from_baseline"]),
+                "created_at": str(r["created_at"]),
+                "status": str(r["status"]),
+                "is_stale": stale,
+            }
+    else:
+        for item in items:
+            item["preliminary_recommendation"] = None
     return {"items":items,"total":int(total),"filtered_total":len(items)}
 
 
