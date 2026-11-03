@@ -2072,7 +2072,7 @@ async function candidateForcePreviewPresentation() {
         "Помилки оцінювання не призводять до відхилення Candidate.",
         "Поточні прогнози не змінюються.",
         busy ? "Інша пакетна операція вже виконується." : "",
-      ].filter(Boolean).join("\\n")),
+      ].filter(Boolean).join("\n")),
       buttonsBlock([
         ...(!busy && preview.can_start && preview.pending > 0
           ? [button("⚡ Перевірити й підтвердити", "candidate-force-confirm", "primary")]
@@ -2091,7 +2091,7 @@ async function candidateForceConfirmPresentation() {
     title: "⚡ Підтвердити Candidate Force",
     tone: "neutral",
     blocks: [
-      textBlock(`Пакетна AI-оцінка ${preview.pending} Candidate може тривати кілька хвилин. Прийняті Candidate створять official Evidence, відхилені залишаться в аудиті. Прогнози не змінюються.\\n\\nПідтвердити запуск?`),
+      textBlock(`Пакетна AI-оцінка ${preview.pending} Candidate може тривати кілька хвилин. Прийняті Candidate створять official Evidence, відхилені залишаться в аудиті. Прогнози не змінюються.\n\nПідтвердити запуск?`),
       buttonsBlock([
         button("✅ Запустити Candidate Force", "candidate-force-apply", "success", false),
         button("❌ Скасувати", "candidate-force"),
@@ -2109,7 +2109,7 @@ async function candidateForceApplyPresentation(ctx) {
     tone: "neutral",
     blocks: [
       textBlock(result.status === "started"
-        ? `Пакет запущено. ID: ${result.run_id}\\nCandidate у черзі: ${result.pending}\\nПеревіряй хід виконання через кнопку статусу.`
+        ? `Пакет запущено. ID: ${result.run_id}\nCandidate у черзі: ${result.pending}\nПеревіряй хід виконання через кнопку статусу.`
         : `Результат запуску: ${result.status || "невідомо"}`),
       buttonsBlock([button("📊 Перевірити статус", "candidate-force-status", "primary")]),
       buttonsBlock([button("◀️ Керування", "manage")]),
@@ -2136,7 +2136,7 @@ async function candidateForceStatusPresentation() {
             `Завершено: ${state.finished_at || "—"}`,
             ...results.filter((x) => x.result === "failed").slice(0, 5).map((x) =>
               `Помилка #${x.candidate_id}: ${shortText(x.error || "невідома", 140)}`),
-          ].join("\\n")),
+          ].join("\n")),
       buttonsBlock([
         button("🔄 Оновити статус", "candidate-force-status"),
         button("◀️ До Candidate Force", "candidate-force"),
