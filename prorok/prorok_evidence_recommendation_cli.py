@@ -373,6 +373,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             require_schema_v13(conn)
             ctx=load_context(conn,a.event_id,a.evidence_id)
+            if not a.print_prompt:
+                from prorok_temporal_gate import require_allowed
+                require_allowed(conn,"evidence",a.evidence_id,event_id=a.event_id)
             prompt=build_prompt(ctx)
             if a.print_prompt:
                 print(prompt)
