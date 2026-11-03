@@ -84,3 +84,38 @@ def test_worker_inherits_single_locked_file_descriptor():
     assert 'pass_fds=(fd,)' in source
     assert '"--lock-fd",str(fd)' in source
     assert "os.fstat(args.lock_fd)" in source
+
+
+def test_empty_batch_does_not_spawn_background_worker(tmp_path, capsys, monkeypatch):
+    db = tmp_path / "test.db"
+    make_db(db)
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO refresh_user_decisions VALUES(1,1)")
+    def fail_spawn(*args, **kwargs):
+        raise AssertionError("empty queue must not spawn a worker")
+    monkeypatch.setattr(force.subprocess, "Popen", fail_spawn)
+    assert force.main(["--db",str(db),"--runs-dir",str(tmp_path/"runs"),"start"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "empty"
+
+
+def test_held_lock_is_detected_and_prevents_start(tmp_path, capsys):
+    import fcntl
+    import os
+    db = tmp_path / "test.db"
+    make_db(db)
+    directory = tmp_path / "runs"
+    directory.mkdir()
+    fd = os.open(str(directory / "process.lock"),os.O_CREAT | os.O_RDWR,0o600)
+    try:
+        fcntl.flock(fd,fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert force.worker_active(directory)
+        assert force.main(["--db",str(db),"--runs-dir",str(directory),"start"]) == 0
+        assert json.loads(capsys.readouterr().out)["status"] == "already_running"
+    finally:
+        os.close(fd)
+
+
+def test_interrupted_run_is_visible(tmp_path):
+    directory = tmp_path / "runs"
+    force.write_state(directory,"20261103T190000Z-abcdef12",dict(status="running"))
+    assert force.latest_state(directory)["status"] == "interrupted"
