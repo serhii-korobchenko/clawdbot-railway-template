@@ -58,6 +58,30 @@ def latest_review(conn, kind, item_id, baseline_id):
         ORDER BY review_id DESC LIMIT 1""",(kind,int(item_id),int(baseline_id))).fetchone()
 
 
+def _already_assessed(conn, kind, item_id):
+    if kind != "evidence":
+        return False
+    # An official Evidence item previously used in a finalized assessment
+    # cannot be priced into the forecast again merely due to a later arrival.
+    if _table_exists(conn, "evidence_assessment_decisions"):
+        exists=conn.execute(
+            "SELECT 1 FROM evidence_assessment_decisions WHERE evidence_id=? LIMIT 1",
+            (int(item_id),)).fetchone()
+        if exists is not None:
+            return True
+    if _table_exists(conn, "refresh_candidate_promotions") and _table_exists(conn, "refresh_user_decisions"):
+        columns={str(r[1]) for r in conn.execute("PRAGMA table_info(refresh_candidate_promotions)")}
+        if "decision_id" in columns:
+            exists=conn.execute("""
+                SELECT 1 FROM refresh_candidate_promotions p
+                JOIN refresh_user_decisions ud ON ud.decision_id=p.decision_id
+                WHERE p.evidence_id=? AND ud.assessment_id IS NOT NULL LIMIT 1
+            """,(int(item_id),)).fetchone()
+            if exists is not None:
+                return True
+    return False
+
+
 def inspect(conn, kind, item_id, *, event_id=None):
     if kind not in ("evidence","candidate"):
         raise ValueError("invalid temporal target")
@@ -84,7 +108,10 @@ def inspect(conn, kind, item_id, *, event_id=None):
     classification=classify_publication(row["published_at"], baseline["assessed_at"])
     review=latest_review(conn,kind,item_id,baseline_id)
     decision=review["decision"] if review is not None else None
-    if classification == "newer_publication":
+    if _already_assessed(conn, kind, item_id):
+        status = "already_incorporated"
+        allowed = False
+    elif classification == "newer_publication":
         status = "newer_publication"
         allowed = True
     elif decision == "verified_new":
