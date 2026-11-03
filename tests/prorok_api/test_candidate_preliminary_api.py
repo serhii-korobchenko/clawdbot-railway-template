@@ -4,6 +4,7 @@ import sqlite3
 
 
 def seed_candidate(conn, candidate_id, ordinal):
+    conn.execute("ALTER TABLE refresh_candidate_evidence ADD COLUMN rejection_reason TEXT")
     conn.execute("""CREATE TABLE IF NOT EXISTS candidate_review_decisions (
         candidate_review_decision_id INTEGER PRIMARY KEY,
         candidate_id INTEGER NOT NULL,
