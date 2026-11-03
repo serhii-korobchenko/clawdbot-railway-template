@@ -7,6 +7,15 @@ def test_official_evidence_page(logged_in_client):
             "items": [
                 {
                     "evidence_id": 42,
+                    "temporal": {
+                        "target_type": "evidence", "target_id": 42, "event_id": "event-1",
+                        "published_at": "2026-09-01T08:00:00Z",
+                        "ingested_at": "2026-09-17T08:30:00Z",
+                        "latest_assessed_at": "2026-09-10T10:00:00Z",
+                        "latest_assessment_id": 8, "status": "review_required",
+                        "automated_reassessment_allowed": False,
+                        "review_id": None, "review_decision": None, "review_rationale": None,
+                    },
                     "run_id": 7,
                     "created_at": "2026-09-17T08:30:00Z",
                     "direction": "indicator",
@@ -56,6 +65,8 @@ def test_official_evidence_page(logged_in_client):
     assert "Official evidence summary" in response.text
     assert "Trusted source" in response.text
     assert "Evidence #42" in response.text
+    assert "Остання оцінка #8" in response.text
+    assert "Джерело не новіше за останню оцінку" in response.text
     assert "Candidates" in response.text
     assert "PROROK_APP" in response.text
     assert "внесено" in response.text
