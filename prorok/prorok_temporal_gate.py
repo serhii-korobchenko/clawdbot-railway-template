@@ -113,3 +113,14 @@ def require_allowed(conn, kind, item_id, *, event_id=None):
         raise ValueError(f"temporal provenance blocked: {kind} #{item_id}: {state['status']}; "
                          "requires documented review against current assessment")
     return state
+
+
+def enforce_if_enabled(conn, kind, item_id, *, event_id=None):
+    """Protect v18+ databases while allowing pre-migration legacy test schemas.
+
+    New Candidate Force runs must additionally require v18 explicitly; this
+    compatibility wrapper is for existing individual Evidence/assessment flows.
+    """
+    if not _table_exists(conn, "evidence_temporal_reviews"):
+        return None
+    return require_allowed(conn,kind,item_id,event_id=event_id)
