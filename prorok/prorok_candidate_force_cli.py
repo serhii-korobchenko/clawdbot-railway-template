@@ -171,6 +171,7 @@ def main(argv=None):
     worker=sub.add_parser("_worker")
     worker.add_argument("run_id")
     worker.add_argument("--actor",required=True)
+    worker.add_argument("--lock-fd",type=int,required=True)
     args=p.parse_args(argv)
     db=resolve_db(str(args.db) if args.db else None)
     if args.command=="status":
@@ -181,6 +182,14 @@ def main(argv=None):
             ids=pending_ids(conn)
         print(json.dumps({"pending":len(ids),"limit":MAX_ITEMS,"can_start":len(ids)<=MAX_ITEMS}))
         return 0
+    if args.command=="_worker":
+        # Keep the inherited lock descriptor; opening process.lock a second time
+        # would deadlock against the lock inherited from the parent.
+        os.fstat(args.lock_fd)
+        try:
+            return run_worker(db,args.runs_dir,args.run_id,args.actor)
+        finally:
+            os.close(args.lock_fd)
     args.runs_dir.mkdir(parents=True,exist_ok=True)
     fd=os.open(str(args.runs_dir / "process.lock"),os.O_CREAT|os.O_RDWR,0o600)
     try:
@@ -189,11 +198,6 @@ def main(argv=None):
         print(json.dumps({"status":"already_running"}))
         os.close(fd)
         return 0
-    if args.command=="_worker":
-        try:
-            return run_worker(db,args.runs_dir,args.run_id,args.actor)
-        finally:
-            os.close(fd)
     with connect(db) as conn:
         ids=pending_ids(conn)
     if len(ids)>MAX_ITEMS:
@@ -202,7 +206,7 @@ def main(argv=None):
         return 2
     run_id=dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")+"-"+uuid.uuid4().hex[:8]
     command=[sys.executable,str(Path(__file__).resolve()),"--db",str(db),
-             "--runs-dir",str(args.runs_dir),"_worker",run_id,"--actor",args.actor]
+             "--runs-dir",str(args.runs_dir),"_worker",run_id,"--actor",args.actor,"--lock-fd",str(fd)]
     try:
         # Inheriting the flock descriptor prevents concurrent starts while the worker runs.
         with open(os.devnull,"wb") as null:
