@@ -119,3 +119,14 @@ def test_v18_gate_does_not_mutate_legacy_databases(tmp_path):
     with pytest.raises(ValueError):
         temporal.require_allowed(c,"evidence",11)
     c.close()
+
+
+def test_confirmed_duplicate_overrides_newer_publication(tmp_path):
+    c=make_db(tmp_path);install_schema(c)
+    assert temporal.inspect(c,"evidence",12)["status"]=="newer_publication"
+    review.add_review(c,"evidence",12,"already_incorporated",
+                      "This newer posting repeats information already assessed","analyst")
+    state=temporal.inspect(c,"evidence",12)
+    assert state["status"]=="already_incorporated"
+    assert state["automated_reassessment_allowed"] is False
+    c.close()
