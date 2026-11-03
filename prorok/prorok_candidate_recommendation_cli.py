@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 try:
+    from . import prorok_temporal_gate as temporal
     from . import prorok_evidence_recommendation_cli as official
     from .prorok_evidence_recommendation_parser import (
         METHODOLOGY_VERSION,
@@ -22,6 +23,7 @@ try:
     )
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import prorok_temporal_gate as temporal
     import prorok_evidence_recommendation_cli as official
     from prorok_evidence_recommendation_parser import (
         METHODOLOGY_VERSION,
@@ -142,6 +144,7 @@ def persist_report(
     conn.execute("BEGIN IMMEDIATE")
     try:
         official.ensure_baseline_current(conn, ctx)
+        temporal.require_allowed(conn,"candidate",candidate_id,event_id=ctx.event_id)
         recommendation_id = conn.execute(
             """INSERT INTO candidate_assessment_recommendations(
                 candidate_id,event_id_snapshot,baseline_assessment_id,baseline_probability,
@@ -182,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             require_schema_v16(conn)
             ctx = load_context(conn, a.candidate_id)
+            if not a.print_prompt:
+                temporal.require_allowed(conn,"candidate",a.candidate_id,event_id=ctx.event_id)
             prompt = build_prompt(ctx, a.candidate_id)
             if a.print_prompt:
                 print(prompt); return 0
@@ -198,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             conn.close()
-    except (CliError, sqlite3.Error, OSError) as exc:
+    except (CliError, sqlite3.Error, OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr); return 1
 
 
