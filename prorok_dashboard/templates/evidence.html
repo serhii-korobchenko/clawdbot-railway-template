@@ -172,7 +172,7 @@
           <span class="evidence-direction">{{ item.direction }}</span>
           <span>{{ item.strength or 'strength n/a' }}</span>
           <span>Refresh #{{ item.refresh_id }}</span>
-          <span>Candidate #{{ item.ordinal }}</span>
+          <span>Candidate #{{ item.candidate_id }}</span>
         </div>
         <h2>
           {% if item.event_id %}<a href="/events/{{ item.event_id }}">{{ item.event_title }}</a>{% else %}{{ item.event_title }}{% endif %}
@@ -203,6 +203,28 @@
       <span>Credibility: {{ item.credibility if item.credibility is not none else '—' }}</span>
       <span>Freshness: {{ item.freshness or '—' }}</span>
       {% if item.duplicate_risk %}<span>Duplicate risk: {{ item.duplicate_risk }}</span>{% endif %}
+    </div>
+
+    {% set rec = item.preliminary_recommendation %}
+    <div class="quality-metrics candidate-preliminary-assessment">
+      {% if rec %}
+      <span><strong>Попередня AI-оцінка Candidate #{{ item.candidate_id }}</strong> · Recommendation #{{ rec.candidate_assessment_recommendation_id }}</span>
+      <span>Поточна оцінка на момент рекомендації: {{ rec.baseline_probability }}%</span>
+      <span>Рекомендована оцінка: {{ rec.recommended_probability }}%</span>
+      <span>Зміна: {% if rec.probability_delta > 0 %}+{% endif %}{{ rec.probability_delta }} п.п.</span>
+      <span>Confidence: {{ rec.recommendation_confidence }}</span>
+      <span>Стан рекомендації:
+        {% if rec.is_stale %}застаріла / потребує переоцінювання
+        {% elif rec.status == 'ready' %}актуальна попередня оцінка
+        {% else %}{{ rec.status }}{% endif %}
+      </span>
+      {% if rec.created_at %}<span>Створено: {{ rec.created_at|fmt_datetime }}</span>{% endif %}
+      {% if rec.recommendation_rationale %}<p><strong>Обґрунтування:</strong> {{ rec.recommendation_rationale }}</p>{% endif %}
+      {% if rec.delta_justification %}<p><strong>Пояснення зміни:</strong> {{ rec.delta_justification }}</p>{% endif %}
+      {% else %}
+      <span>Попередню AI-оцінку ще не сформовано.</span>
+      {% endif %}
+      <span><strong>Статус:</strong> {% if item.evidence_id is not none %}Candidate перенесено до official Evidence #{{ item.evidence_id }}{% elif item.review_decision_type == 'reject' %}Candidate відхилено — не є official Evidence{% else %}Candidate не є official Evidence{% endif %}</span>
     </div>
 
     {% if item.rejection_reason %}
