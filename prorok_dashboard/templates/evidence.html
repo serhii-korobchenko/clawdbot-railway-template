@@ -128,6 +128,27 @@
 
     <p class="evidence-summary">{{ item.summary }}</p>
 
+    {% if item.temporal %}
+    <div class="quality-metrics evidence-temporal-provenance">
+      <span><strong>Часова актуальність Evidence #{{ item.evidence_id }}</strong></span>
+      <span>Дата джерела: {{ item.temporal.published_at|fmt_datetime if item.temporal.published_at else 'невідома' }}</span>
+      <span>Надійшло до PROROK: {{ item.temporal.ingested_at|fmt_datetime if item.temporal.ingested_at else '—' }}</span>
+      <span>Остання оцінка #{{ item.temporal.latest_assessment_id }}: {{ item.temporal.latest_assessed_at|fmt_datetime }}</span>
+      {% if item.temporal.status == 'newer_publication' %}
+      <span>Публікація новіша за останню оцінку (новизна змісту перевіряється окремо).</span>
+      {% elif item.temporal.status == 'verified_new' %}
+      <span>Раніше не врахована інформація: підтверджено перевіркою #{{ item.temporal.review_id }}</span>
+      {% elif item.temporal.status == 'already_incorporated' %}
+      <span>⚠️ Інформація вже врахована. Переоцінку заблоковано.</span>
+      {% elif item.temporal.status == 'unknown_date' %}
+      <span>⚠️ Дата джерела невідома або неоднозначна. Автоматичну переоцінку заблоковано до перевірки.</span>
+      {% else %}
+      <span>⚠️ Джерело не новіше за останню оцінку. Переоцінку заблоковано до перевірки новизни.</span>
+      {% endif %}
+      {% if item.temporal.review_rationale %}<p><strong>Рішення перевірки:</strong> {{ item.temporal.review_rationale }}</p>{% endif %}
+    </div>
+    {% endif %}
+
     <div class="quality-metrics">
       <span><strong>PROROK_APP:</strong> {% if item.prorok_app.state == 'marked' %}✅ внесено{% else %}⬜ не внесено{% endif %}</span>
       {% if item.prorok_app.changed_at %}<span>Оновлено {{ item.prorok_app.changed_at|fmt_datetime }}</span>{% endif %}
